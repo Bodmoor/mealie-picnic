@@ -18,8 +18,25 @@ Items with no picnic extras at all are shown first as **nieuw**. Items with
 
 ## Run
 
+### From the published image (GHCR)
+
+Every merge to `main` publishes `ghcr.io/bodmoor/mealie-picnic:latest` (plus `:main`,
+and `:x.y.z` for `v*.*.*` tags), for **linux/amd64 and linux/arm64**. While the repository is private the package is too,
+so the Docker host needs a login with a `read:packages` PAT:
+
 ```bash
-cp .env.example .env      # fill in the values
+cp .env.example .env                                   # fill in the values
+echo $GHCR_PAT | docker login ghcr.io -u <github-user> --password-stdin
+docker compose -f docker-compose.deploy.yml pull
+docker compose -f docker-compose.deploy.yml up -d
+```
+
+Pin a version instead of tracking `latest` with `TAG=0.1.0` in `.env`.
+
+### Building locally
+
+```bash
+cp .env.example .env
 docker compose up -d --build
 ```
 
