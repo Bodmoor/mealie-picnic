@@ -245,4 +245,58 @@ public class MealieClientTests
 
         Assert.Empty(handler.Sent);
     }
+
+    [Fact]
+    public async Task Reads_the_unit_so_a_weight_is_not_a_pack_count()
+    {
+        // Issue #5: without the unit, quantity 500 became 500 packs.
+        var handler = new StubHandler()
+            .OnJson("shopping/lists", Lists)
+            .OnJson("shopping/items", """
+                { "items": [ {
+                    "id": "11111111-1111-1111-1111-111111111111",
+                    "shoppingListId": "dddddddd-1111-1111-1111-111111111111",
+                    "note": "", "display": "500 gram bloem", "checked": false,
+                    "position": 0, "quantity": 500,
+                    "unitId": "cccccccc-1111-1111-1111-111111111111",
+                    "unit": { "id": "cccccccc-1111-1111-1111-111111111111", "name": "gram" },
+                    "labelId": null, "label": null,
+                    "foodId": "aaaaaaaa-1111-1111-1111-111111111111",
+                    "food": { "id": "aaaaaaaa-1111-1111-1111-111111111111", "name": "bloem",
+                              "description": "", "aliases": [],
+                              "extras": { "picnic_uid": "s1", "picnic_pack": "1 kg" } }
+                } ] }
+                """);
+
+        var item = Assert.Single(await TestFactory.Mealie(handler).GetItemsAsync(null, default));
+
+        Assert.Equal("gram", item.Unit);
+        Assert.Equal("1 kg", item.PicnicPack);
+        Assert.Equal(1, item.Amount);        // not 500
+    }
+
+    [Fact]
+    public async Task Falls_back_to_the_unit_abbreviation()
+    {
+        var handler = new StubHandler()
+            .OnJson("shopping/lists", Lists)
+            .OnJson("shopping/items", """
+                { "items": [ {
+                    "id": "22222222-2222-2222-2222-222222222222",
+                    "shoppingListId": "dddddddd-1111-1111-1111-111111111111",
+                    "note": "", "display": "2 kg aardappels", "checked": false,
+                    "position": 0, "quantity": 2,
+                    "unit": { "id": "cccccccc-2222-2222-2222-222222222222", "abbreviation": "kg" },
+                    "foodId": "aaaaaaaa-2222-2222-2222-222222222222",
+                    "food": { "id": "aaaaaaaa-2222-2222-2222-222222222222", "name": "aardappel",
+                              "description": "", "aliases": [],
+                              "extras": { "picnic_uid": "s2", "picnic_pack": "1 kg" } }
+                } ] }
+                """);
+
+        var item = Assert.Single(await TestFactory.Mealie(handler).GetItemsAsync(null, default));
+
+        Assert.Equal("kg", item.Unit);
+        Assert.Equal(2, item.Amount);        // 2 kg from 1 kg bags
+    }
 }

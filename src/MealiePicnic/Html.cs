@@ -419,7 +419,9 @@ public static class Html
         }
 
         function itemRow(it, index) {
-          const sub = it.state === 1 ? esc(it.picnicLabel || it.picnicUid) : esc(it.display);
+          const sub = it.state === 1
+            ? `${esc(it.picnicLabel || it.picnicUid)} &middot; ${esc(it.amountReason)}`
+            : esc(it.display);
           return `<div class="item" onclick="openItem(${index})">
                     <div>
                       <div class="name">${esc(it.foodName)}</div>
@@ -555,13 +557,17 @@ public static class Html
         async function link(index, productId) {
           const it = items[index];
           // Keep the product name alongside the id: a bare uid is undiagnosable later.
-          const label = lastProducts.find(p => p.id === productId)?.name ?? '';
+          const product = lastProducts.find(p => p.id === productId);
+          const label = product?.name ?? '';
+          // unitQuantity ("1 kg", "6 stuks") is what lets the basket turn
+          // "500 gram" into a number of packs instead of 500 packs.
+          const pack = product?.unitQuantity ?? '';
 
           const hits = document.getElementById('hits');
           if (hits) hits.innerHTML = `<p class="muted">Koppelen aan ${esc(label || productId)}...</p>`;
 
           try {
-            await jpost('/api/link', {foodId: it.foodId, picnicUid: productId, label});
+            await jpost('/api/link', {foodId: it.foodId, picnicUid: productId, label, pack});
             await loadList();
           } catch (e) {
             alert('Opslaan mislukt: ' + e.message);
@@ -586,8 +592,12 @@ public static class Html
             const r = await jpost('/api/basket', {checkOff, listId: currentList});
             log.innerHTML = (r.results.length
                 ? r.results.map(x => x.ok
-                    ? `<div class="ok">&check; ${esc(x.name)} x${x.amount}</div>`
-                    : `<div class="bad">&times; ${esc(x.name)}: ${esc(x.error)}</div>`).join('')
+                    ? `<div class="ok">&check; ${esc(x.name)} x${x.amount}${
+                         checkOff && !x.checkedOff
+                           ? ' <span class="muted">(in de kar, niet afgevinkt)</span>'
+                           : ''}</div>`
+                    : `<div class="bad">&times; ${esc(x.name)}: ${esc(x.error)}
+                         <span class="muted">&mdash; blijft op de lijst</span></div>`).join('')
                 : '<div class="muted">Niets toegevoegd: geen gekoppelde items op deze lijst.</div>')
               + (r.aborted ? '<div class="bad">Gestopt na herhaalde fouten; rest niet geprobeerd.</div>' : '')
               + (r.unmapped ? `<div class="muted">${r.unmapped} nog niet gekoppeld</div>` : '');

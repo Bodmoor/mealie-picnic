@@ -246,9 +246,55 @@ public sealed class PicnicClient(
 
     // ------------------------------------------------------------------ cart
 
-    public Task AddToCartAsync(string productId, int count, CancellationToken ct) =>
-        SendAsync(Build(HttpMethod.Post, "/cart/add_product",
+    /// <summary>
+    /// Add a product and CONFIRM it arrived.
+    ///
+    /// Picnic answers some refusals with HTTP 200 and an error object (the same
+    /// pattern as /user/login), and add_product returns the updated cart. Taking
+    /// 2xx as success meant a refused add looked fine, and the caller then ticked
+    /// the item off in Mealie with nothing in the basket (issue #7).
+    /// </summary>
+    public async Task AddToCartAsync(string productId, int count, CancellationToken ct)
+    {
+        var cart = await SendAsync(Build(HttpMethod.Post, "/cart/add_product",
             new { product_id = productId, count }), ct);
+
+        if (cart?["error"] is { } error)
+        {
+            var code = error["code"]?.GetValue<string>() ?? "unknown";
+            throw new PicnicCartException($"Picnic refused to add {productId} ({code}).");
+        }
+
+        // The response is the new cart; if the product is not in it, the add did
+        // not take effect however cheerful the status code was.
+        if (cart is not null && !ContainsProduct(cart, productId))
+            throw new PicnicCartException(
+                $"Picnic accepted the request but {productId} is not in the cart.");
+    }
+
+    /// <summary>Depth-first search for a selling unit id anywhere in the cart tree.</summary>
+    private static bool ContainsProduct(JsonNode node, string productId)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+                if (obj["id"]?.GetValue<string>() == productId)
+                    return true;
+                foreach (var pair in obj)
+                    if (pair.Value is not null && ContainsProduct(pair.Value, productId))
+                        return true;
+                return false;
+
+            case JsonArray array:
+                foreach (var child in array)
+                    if (child is not null && ContainsProduct(child, productId))
+                        return true;
+                return false;
+
+            default:
+                return false;
+        }
+    }
 
     public Task<JsonNode?> GetCartAsync(CancellationToken ct) =>
         SendAsync(Build(HttpMethod.Get, "/cart"), ct);
@@ -283,3 +329,10 @@ public sealed class PicnicAuthException(string message) : Exception(message);
 
 /// <summary>Raised when no credentials are available to log in with at all.</summary>
 public sealed class PicnicCredentialsException(string message) : Exception(message);
+
+/// <summary>
+/// Raised when Picnic accepted the request but the cart did not change, or
+/// returned an error body under a 2xx. Callers must NOT treat this as success:
+/// ticking the Mealie item off would lose the line silently.
+/// </summary>
+public sealed class PicnicCartException(string message) : Exception(message);

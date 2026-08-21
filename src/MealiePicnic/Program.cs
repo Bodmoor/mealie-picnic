@@ -305,6 +305,8 @@ api.MapPost("/link", async (LinkRequest? body, MealieClient mealie, Cancellation
         [MealieClient.ExtraUid] = body.PicnicUid,
         [MealieClient.ExtraFlag] = "true",
         [MealieClient.ExtraLabel] = body.Label ?? "",
+        // Stored so the basket can work out how many packs a weight needs.
+        [MealieClient.ExtraPack] = body.Pack ?? "",
     }, ct);
     return Results.Ok(new { ok = true, extras });
 });
@@ -354,12 +356,32 @@ api.MapPost("/basket", async (BasketRequest? body, MealieClient mealie, PicnicCl
 
         try
         {
+            // Throws unless the product is verifiably in the cart, so nothing below
+            // runs for a refused add (issue #7).
             await picnic.AddToCartAsync(item.PicnicUid!, item.Amount, ct);
-            results.Add(new CartResult(item.FoodName, item.PicnicUid!, item.Amount, true, null));
             consecutiveFailures = 0;
 
+            var checkedOff = false;
             if (body?.CheckOff == true)
-                await mealie.CheckItemAsync(item.ItemId, ct);
+            {
+                try
+                {
+                    await mealie.CheckItemAsync(item.ItemId, ct);
+                    checkedOff = true;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    // The basket add DID succeed. Reporting this as a failed line
+                    // would invite a retry and a double order, so it is recorded as
+                    // a successful add that is still on the Mealie list.
+                    log.LogWarning(ex, "Checked off failed for {Food} ({ItemId})",
+                        item.FoodName, item.ItemId);
+                }
+            }
+
+            results.Add(new CartResult(
+                item.FoodName, item.PicnicUid!, item.Amount, true, null, checkedOff));
         }
         // These must not be swallowed per-item: the 401 middleware turns the auth
         // failure into the login dialog, and cancellation must stop the loop.
@@ -370,7 +392,14 @@ api.MapPost("/basket", async (BasketRequest? body, MealieClient mealie, PicnicCl
             // Full detail to the log; only a short, stable message to the client
             // (upstream error bodies can contain internal paths and payloads).
             log.LogWarning(ex, "Basket add failed for {Food} ({Uid})", item.FoodName, item.PicnicUid);
-            var reason = ex is HttpRequestException ? "upstream request failed" : "internal error";
+            var reason = ex switch
+            {
+                // Picnic said no (or silently did not add it): worth showing, since
+                // the item stays on the Mealie list and can be re-linked.
+                PicnicCartException => "Picnic weigerde het product",
+                HttpRequestException => "upstream request failed",
+                _ => "internal error",
+            };
             results.Add(new CartResult(item.FoodName, item.PicnicUid!, item.Amount, false, reason));
 
             // A burst of failures usually means Picnic is refusing us; hammering an
@@ -402,7 +431,7 @@ app.Run();
 internal record TwoFactorChannel(string? Channel);
 internal record Otp(string? Code);
 internal record FoodRef(string FoodId);
-internal record LinkRequest(string FoodId, string PicnicUid, string? Label);
+internal record LinkRequest(string FoodId, string PicnicUid, string? Label, string? Pack);
 internal record BasketRequest(bool CheckOff, string? ListId);
 internal record LoginRequest(string? User, string? Password);
 
