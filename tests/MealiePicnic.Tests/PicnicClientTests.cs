@@ -166,12 +166,15 @@ public class PicnicClientTests
     public async Task Sends_required_picnic_headers()
     {
         var inspector = new HeaderInspector();
+        var tokens = Tokens("tok");
 
-        await TestFactory.Picnic(inspector, tokens: Tokens("tok")).SearchAsync("wrap", default);
+        await TestFactory.Picnic(inspector, tokens: tokens).SearchAsync("wrap", default);
 
         Assert.Equal("tok", inspector.Headers["x-picnic-auth"]);
-        // Picnic binds 2FA verification to the device id, so it must not drift.
-        Assert.Equal("3C417201548B2E3B", inspector.Headers["x-picnic-did"]);
+        // Per-install random device id; Picnic binds 2FA to it, so it must be the
+        // store's stable value, not a constant shared by every deployment.
+        Assert.Equal(tokens.DeviceId, inspector.Headers["x-picnic-did"]);
+        Assert.Matches("^[A-F0-9]{16}$", inspector.Headers["x-picnic-did"]);
         Assert.Contains("30100;", inspector.Headers["x-picnic-agent"]);
         Assert.Equal("okhttp/4.9.0", inspector.Headers["User-Agent"]);
     }

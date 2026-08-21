@@ -23,12 +23,15 @@ COPY --from=build /app .
 # restart would demand 2FA again. Owned by the non-root app user (UID 1654,
 # $APP_UID in Microsoft's images) so a fresh named volume inherits that owner.
 RUN mkdir -p /data && chown -R 1654:1654 /data
-VOLUME ["/data"]
 
 ENV ASPNETCORE_URLS=http://+:8080 \
     DATA_DIR=/data \
     DOTNET_gcServer=0
 EXPOSE 8080
+
+# No HEALTHCHECK on purpose: the aspnet base image ships no curl/wget, and a
+# probe that only proves the dotnet runtime exists (not that the app serves)
+# would be worse than none. Add one at the orchestrator level if needed.
 
 USER 1654:1654
 

@@ -23,7 +23,7 @@ docker compose up -d --build
 
 Open <http://localhost:8080>, log in with `APP_PASSWORD`, then press **Picnic login**.
 The first login triggers 2FA: pick SMS or e-mail, type the code, done. The resulting
-token is cached in `./data/picnic-token` and is valid for months, so this is rare.
+token is cached in `DATA_DIR` (the `picnic-data` volume under Docker) and is valid for months, so this is rare.
 
 ## Local development
 
@@ -49,8 +49,7 @@ the repository. The `UserSecretsId` is already set in `MealiePicnic.csproj`.
 
 **Environment variables win over user secrets.** A key left in `launchSettings.json`
 silently shadows the secret, even when set to an empty string — remove it there rather
-than blanking it. `launchSettings.json` is gitignored; `launchSettings.example.json`
-shows the non-secret keys that belong in it.
+than blanking it. `launchSettings.json` is gitignored.
 
 The Picnic credentials are optional even as secrets: leave them unset and the web UI
 asks for them at login instead. Only the resulting auth token is persisted, to `DATA_DIR`.
@@ -70,7 +69,9 @@ All via environment variables.
 | `PICNIC_COUNTRY`       | no       | `NL`           | `NL`, `DE`, `FR`                          |
 | `PICNIC_API_VERSION`   | no       | `15`           | bump if Picnic starts returning 400s      |
 | `SEARCH_CACHE_MINUTES` | no       | `30`           | in-memory cache for searches and details  |
-| `DATA_DIR`             | no       | `/data`        | mounted volume for the token              |
+| `DATA_DIR`             | no       | `/data`        | volume for the token and device id        |
+| `COOKIE_SECURE`        | no       | `false`        | force Secure on the session cookie (needs TLS) |
+| `TRUST_PROXY`          | no       | `false`        | honour X-Forwarded-* from a reverse proxy |
 
 ## Tests
 
@@ -126,5 +127,7 @@ POST /cart/add_product    {product_id, count}
 * Everything Picnic-side is unofficial and can break when they change their app.
 * Quantities: Mealie items added without an amount have `quantity: 0`, so the app adds
   1 of each. Pack sizes are not reconciled — 300 g of flour and a 1 kg bag both count as one.
-* Auth is a single shared password. Fine behind your own network; put a reverse proxy
-  with TLS in front of it if you expose it.
+* Auth is a single shared password behind a rate-limited login. The compose file
+  publishes on loopback only; for ANY exposure beyond that, a TLS-terminating
+  reverse proxy is required, with `COOKIE_SECURE=true` and `TRUST_PROXY=true` set —
+  otherwise the session cookie and `APP_PASSWORD` travel the network in cleartext.

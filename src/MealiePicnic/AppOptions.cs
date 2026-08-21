@@ -20,6 +20,19 @@ public sealed class AppOptions
 
     public int SearchCacheMinutes { get; init; } = 30;
 
+    /// <summary>
+    /// Force the Secure flag on the session cookie (requires TLS, directly or via
+    /// a trusted proxy). Off by default so plain-HTTP local dev keeps working;
+    /// turn it on for any deployment that is reachable beyond loopback.
+    /// </summary>
+    public bool CookieSecure { get; init; }
+
+    /// <summary>
+    /// Honour X-Forwarded-For / X-Forwarded-Proto from a reverse proxy. Only
+    /// enable when a proxy is actually in front: it trusts those headers blindly.
+    /// </summary>
+    public bool TrustProxy { get; init; }
+
     public string PicnicBaseUrl =>
         $"https://storefront-prod.{PicnicCountry.ToLowerInvariant()}.picnicinternational.com/api/{PicnicApiVersion}";
 
@@ -57,6 +70,8 @@ public sealed class AppOptions
             AppPassword = Get("APP_PASSWORD"),
             DataDir = Get("DATA_DIR", "/data"),
             SearchCacheMinutes = int.TryParse(Get("SEARCH_CACHE_MINUTES"), out var m) ? m : 30,
+            CookieSecure = bool.TryParse(Get("COOKIE_SECURE"), out var cs) && cs,
+            TrustProxy = bool.TryParse(Get("TRUST_PROXY"), out var tp) && tp,
         };
 
         // Picnic credentials are deliberately not required: they can be typed into

@@ -4,7 +4,12 @@
 **/.vscode
 **/*.user
 tests
-data
+# F1: a bare 'data' only matches ./data at the context root -- local dev writes a
+# REAL Picnic token to src/MealiePicnic/data/, which COPY src/ would ship into the
+# build layer. The ** form covers every data directory.
+**/data/
+**/*.env
+**/secrets.json
 .env
 .git
 .gitignore
