@@ -14,8 +14,6 @@ COPY src/MealiePicnic/MealiePicnic.csproj src/MealiePicnic/
 RUN dotnet restore src/MealiePicnic/MealiePicnic.csproj -a $TARGETARCH
 
 COPY src/ src/
-# The PWA icons are EmbeddedResource items referenced from the csproj.
-COPY assets/ assets/
 RUN dotnet publish src/MealiePicnic/MealiePicnic.csproj \
         -c Release \
         -a $TARGETARCH \

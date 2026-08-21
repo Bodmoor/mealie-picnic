@@ -94,7 +94,7 @@ All via environment variables.
 
 ## Icons
 
-`assets/icon-192.png`, `assets/icon-512.png` and `assets/icon-maskable-512.png` are
+The three PNGs in `src/MealiePicnic/assets/` are
 compiled into the assembly as embedded resources, so there is no `wwwroot` to deploy.
 Replace the files to change the icon; the maskable one needs its art inset by about
 20% or Android's circular crop clips it.
