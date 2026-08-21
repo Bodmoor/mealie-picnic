@@ -47,6 +47,8 @@ internal static class Html
           h2 { font-size:15px; margin:26px 0 10px; color:#9aa0a6; font-weight:600 }
           a { color:#7fb2e5 }
           .bar { display:flex; gap:9px; flex-wrap:wrap; align-items:center; margin:16px 0 6px }
+          select { border:1px solid #3a3d41; background:#1d2024; color:#e8eaed;
+                   border-radius:7px; padding:7px 9px; font-size:14px }
           button { border:1px solid #3a3d41; background:#1d2024; color:#e8eaed;
                    border-radius:7px; padding:7px 13px; font-size:14px; cursor:pointer }
           button:hover { border-color:#5b9dd9 }
@@ -64,10 +66,21 @@ internal static class Html
                        border:1px solid #3a3d41; color:#9aa0a6; white-space:nowrap }
           .tag.new { border-color:#c9a227; color:#e0be55 }
           .tag.linked { border-color:#4f8a5c; color:#7fc08a }
+          details.done-block { margin-top:26px; border-top:1px solid #2a2d31; padding-top:14px }
+          details.done-block summary { cursor:pointer; color:#9aa0a6; font-size:14px;
+                                       font-weight:600; padding:4px 0 }
+          details.done-block summary:hover { color:#e8eaed }
+          details.done-block .item { cursor:default; opacity:.6; margin-top:7px }
+          details.done-block .item:hover { border-color:#2a2d31 }
           .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:11px }
           .card { border:1px solid #2a2d31; border-radius:10px; padding:10px; background:#1a1d21;
                   cursor:pointer; text-align:left }
           .card:hover { border-color:#5b9dd9 }
+          .card.linked { border-color:#4f8a5c; background:#1a2420 }
+          .card.linked:hover { border-color:#7fc08a }
+          .badge { display:inline-block; font-size:11px; color:#7fc08a;
+                   border:1px solid #4f8a5c; border-radius:20px;
+                   padding:1px 7px; margin-bottom:6px }
           .card img { width:100%; height:104px; object-fit:contain; background:#fff;
                       border-radius:7px; margin-bottom:8px }
           .card .n { font-size:12.5px; line-height:1.3; height:50px; overflow:hidden }
@@ -85,23 +98,25 @@ internal static class Html
           .ok { color:#7fc08a } .bad { color:#e59a9a }
           dialog { background:#1d2024; color:#e8eaed; border:1px solid #2a2d31;
                    border-radius:12px; padding:22px; width:300px }
+          button:disabled { opacity:.5; cursor:default }
+          button:disabled:hover { border-color:#3a3d41 }
           dialog input { width:100%; padding:8px 10px; margin-top:8px; border-radius:6px;
                          border:1px solid #3a3d41; background:#15171a; color:#e8eaed }
         </style>
 
         <h1>Mealie &rarr; Picnic</h1>
         <div class="muted">
-          <span id="pstatus">Picnic: onbekend</span> &middot; <a href="/logout">uitloggen</a>
+          <span id="pstatus">Picnic: onbekend</span>
+          &middot; <a href="/logout">afmelden bij deze app</a>
         </div>
 
         <div id="view"></div>
 
         <dialog id="creds">
           <b>Picnic inloggen</b>
-          <p class="muted">PICNIC_PASSWORD is niet ingesteld, dus vul hier je gegevens in.
-             Ze worden niet opgeslagen; alleen het token wordt bewaard.</p>
+          <p class="muted" id="credsMsg"></p>
           <input id="cuser" placeholder="E-mailadres" autocomplete="username">
-          <input id="cpass" type="password" placeholder="Wachtwoord" autocomplete="current-password">
+          <input id="cpass" type="password" autocomplete="current-password">
           <div class="bar">
             <button class="primary" onclick="submitCreds()">Inloggen</button>
             <button onclick="document.getElementById('creds').close()">Sluiten</button>
@@ -112,18 +127,23 @@ internal static class Html
           <b>Picnic 2FA</b>
           <p class="muted" id="twofaMsg">Kies waar de code naartoe moet.</p>
           <div class="bar">
-            <button onclick="send2fa('SMS')">SMS</button>
-            <button onclick="send2fa('EMAIL')">E-mail</button>
+            <button data-channel="SMS" data-label="SMS"
+                    onclick="send2fa('SMS')">SMS</button>
+            <button data-channel="EMAIL" data-label="E-mail"
+                    onclick="send2fa('EMAIL')">E-mail</button>
           </div>
           <input id="otp" placeholder="Code" inputmode="numeric">
           <div class="bar">
             <button class="primary" onclick="verify2fa()">Verifieren</button>
-            <button onclick="document.getElementById('twofa').close()">Sluiten</button>
+            <button onclick="resetCooldown();document.getElementById('twofa').close()">Sluiten</button>
           </div>
         </dialog>
 
         <script>
         let items = [], showExcluded = false;
+        let lists = [], currentList = localStorage.getItem('listId') || '';
+        // Last search results, so link() can record the product name it saw.
+        let lastProducts = [];
 
         // Whatever we were doing when Picnic asked us to authenticate, so it can
         // be resumed once login (and any 2FA) completes.
@@ -157,44 +177,100 @@ internal static class Html
 
         // ---------------------------------------------------------------- picnic auth
 
-        let needsCreds = false;
+        // Mirrors /api/picnic/status. configuredPassword is only a flag: the
+        // password itself stays on the server.
+        let picnic = { authenticated: false, hasConfiguredUser: false,
+                       hasConfiguredPassword: false, configuredUser: '' };
 
         async function refreshStatus() {
           try {
-            const s = await jget('/api/picnic/status');
-            needsCreds = s.needsCredentials;
-            document.getElementById('pstatus').textContent =
-              'Picnic: ' + (s.authenticated ? 'ingelogd' : 'niet ingelogd');
-            return s.authenticated;
-          } catch { return false; }
+            picnic = await jget('/api/picnic/status');
+          } catch {
+            picnic = { authenticated: false, hasConfiguredUser: false,
+                       hasConfiguredPassword: false, configuredUser: '' };
+          }
+          renderStatus();
+          return picnic.authenticated;
+        }
+
+        function renderStatus() {
+          const host = document.getElementById('pstatus');
+          host.innerHTML = picnic.authenticated
+            ? `Picnic: <b class="ok">ingelogd</b>
+               <a href="#" onclick="picnicLogout();return false">uitloggen</a>`
+            : `Picnic: <b class="bad">niet ingelogd</b>
+               <a href="#" onclick="picnicLogin();return false">inloggen</a>`;
+        }
+
+        async function picnicLogout() {
+          try {
+            await jpost('/api/picnic/logout');
+          } catch (e) { /* the token is dropped server-side regardless */ }
+          await refreshStatus();
         }
 
         async function picnicLogin() {
-          // No password in the environment (dev mode): collect it in the browser first.
-          if (needsCreds) { document.getElementById('creds').showModal(); return; }
-          await doLogin();
+          if (picnic.authenticated) return;
+
+          // Everything present in configuration? Then no dialog is needed at all.
+          if (picnic.hasConfiguredUser && picnic.hasConfiguredPassword) {
+            await doLogin();
+            return;
+          }
+          openCreds();
+        }
+
+        function openCreds() {
+          // Prefill from configuration so the common case is one click.
+          document.getElementById('cuser').value = picnic.configuredUser || '';
+
+          const pass = document.getElementById('cpass');
+          pass.value = '';
+          pass.placeholder = picnic.hasConfiguredPassword
+            ? 'Laat leeg om het ingestelde wachtwoord te gebruiken'
+            : 'Wachtwoord';
+
+          const missing = [
+            picnic.hasConfiguredUser ? null : 'PICNIC_USER',
+            picnic.hasConfiguredPassword ? null : 'PICNIC_PASSWORD',
+          ].filter(Boolean);
+
+          document.getElementById('credsMsg').textContent = missing.length
+            ? `Niet ingesteld in de configuratie: ${missing.join(' en ')}. `
+              + 'Vul aan; er wordt niets opgeslagen, alleen het token wordt bewaard.'
+            : 'Gegevens komen uit de configuratie. Pas ze hier eventueel aan.';
+
+          document.getElementById('creds').showModal();
         }
 
         async function submitCreds() {
           const user = document.getElementById('cuser').value.trim();
           const pass = document.getElementById('cpass').value;
-          if (!user || !pass) { alert('Vul beide velden in.'); return; }
+
+          if (!user) { alert('Vul een e-mailadres in.'); return; }
+          if (!pass && !picnic.hasConfiguredPassword) { alert('Vul een wachtwoord in.'); return; }
+
           document.getElementById('creds').close();
           document.getElementById('cpass').value = '';
-          await doLogin({user, password: pass});
+          // A blank password means: use the one from configuration.
+          await doLogin({user, password: pass || null});
         }
 
         async function doLogin(creds) {
           try {
             const r = await jpost('/api/picnic/login', creds);
-            if (r.needs2fa) { document.getElementById('twofa').showModal(); return; }
+            if (r.needs2fa) {
+              resetCooldown();
+              document.getElementById('twofaMsg').textContent = 'Kies waar de code naartoe moet.';
+              document.getElementById('twofa').showModal();
+              return;
+            }
             await refreshStatus();
             await runPending();
           } catch (e) {
             // A refused login also arrives as picnic_auth, but means wrong credentials.
             if (e.message.includes('picnic_credentials')) {
-              needsCreds = true;
-              document.getElementById('creds').showModal();
+              openCreds();
               return;
             }
             alert(e instanceof PicnicAuthError
@@ -203,16 +279,64 @@ internal static class Html
           }
         }
 
+        // Resend cooldown: both channel buttons are locked while a code is in flight
+        // and for a while after, so an impatient double-click cannot burn codes.
+        const RESEND_SECONDS = 30;
+        let cooldownTimer = null;
+
+        function channelButtons() {
+          return [...document.querySelectorAll('#twofa button[data-channel]')];
+        }
+
+        function startCooldown(seconds) {
+          clearInterval(cooldownTimer);
+          let left = seconds;
+
+          const tick = () => {
+            for (const button of channelButtons()) {
+              button.disabled = left > 0;
+              button.textContent = left > 0
+                ? `${button.dataset.label} (${left}s)`
+                : button.dataset.label;
+            }
+            if (left-- <= 0) clearInterval(cooldownTimer);
+          };
+
+          tick();
+          cooldownTimer = setInterval(tick, 1000);
+        }
+
+        function resetCooldown() {
+          clearInterval(cooldownTimer);
+          for (const button of channelButtons()) {
+            button.disabled = false;
+            button.textContent = button.dataset.label;
+          }
+        }
+
         async function send2fa(channel) {
+          const buttons = channelButtons();
+          buttons.forEach(b => b.disabled = true);
+          document.getElementById('twofaMsg').textContent = 'Code aanvragen...';
+
           try {
             await jpost('/api/picnic/2fa/generate', {channel});
-            document.getElementById('twofaMsg').textContent = 'Code verstuurd via ' + channel + '.';
-          } catch (e) { alert('Kon geen code sturen: ' + e.message); }
+            document.getElementById('twofaMsg').textContent =
+              `Code verstuurd via ${channel === 'EMAIL' ? 'e-mail' : channel}.`;
+            document.getElementById('otp').focus();
+            startCooldown(RESEND_SECONDS);
+          } catch (e) {
+            // Failed to send: let them retry straight away.
+            document.getElementById('twofaMsg').textContent = 'Kon geen code sturen: ' + e.message;
+            resetCooldown();
+          }
         }
 
         async function verify2fa() {
           try {
             await jpost('/api/picnic/2fa/verify', {code: document.getElementById('otp').value.trim()});
+            resetCooldown();
+            document.getElementById('otp').value = '';
             document.getElementById('twofa').close();
             await refreshStatus();
             await runPending();
@@ -221,10 +345,32 @@ internal static class Html
 
         // ---------------------------------------------------------------- list view
 
+        async function loadLists() {
+          try {
+            const r = await jget('/api/lists');
+            lists = r.lists;
+            // Fall back to the configured default when nothing is remembered, or
+            // when the remembered list has since been deleted in Mealie.
+            if (!currentList || !lists.some(l => l.id === currentList)) {
+              const fallback = lists.find(l =>
+                l.name.trim().toLowerCase() === r.defaultName.trim().toLowerCase());
+              currentList = (fallback ?? lists[0])?.id ?? '';
+            }
+          } catch { lists = []; }
+        }
+
+        function pickList(id) {
+          currentList = id;
+          localStorage.setItem('listId', id);
+          loadList();
+        }
+
         async function loadList() {
           el.innerHTML = '<p class="muted">Laden...</p>';
           try {
-            items = await jget('/api/list');
+            if (!lists.length) await loadLists();
+            const q = currentList ? '?listId=' + encodeURIComponent(currentList) : '';
+            items = await jget('/api/list' + q);
             renderList();
           } catch (e) { el.innerHTML = '<p class="bad">' + esc(e.message) + '</p>'; }
         }
@@ -247,18 +393,25 @@ internal static class Html
         }
 
         function renderList() {
-          const fresh = items.filter(i => i.state === 0);
-          const linked = items.filter(i => i.state === 1);
-          const excluded = items.filter(i => i.state === 2);
+          // Checked items are done: kept out of the buckets and out of the basket,
+          // but still visible in a collapsed section so nothing disappears silently.
+          const open = items.filter(i => !i.checked);
+          const fresh = open.filter(i => i.state === 0);
+          const linked = open.filter(i => i.state === 1);
+          const excluded = open.filter(i => i.state === 2);
+          const done = items.filter(i => i.checked);
 
           el.innerHTML = `
             <div class="bar">
+              <select onchange="pickList(this.value)" title="Mealie lijst">
+                ${lists.map(l => `<option value="${l.id}"
+                  ${l.id === currentList ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}
+              </select>
               <button class="primary" onclick="loadList()">Haal Mealie lijst op</button>
               <button onclick="addAll()">Alles in Picnic mand</button>
               <label class="chk"><input type="checkbox" id="checkoff" checked> afvinken in Mealie</label>
               <label class="chk"><input type="checkbox" ${showExcluded ? 'checked' : ''}
                 onchange="showExcluded=this.checked; renderList()"> toon uitgesloten</label>
-              <button onclick="picnicLogin()">Picnic login</button>
             </div>
             <div id="basketlog" class="log"></div>
 
@@ -275,7 +428,21 @@ internal static class Html
                   <button class="tag" onclick="include('${i.foodId}')">terugzetten</button>
                 </div>`).join('') : ''}
 
-            ${items.length === 0 ? '<p class="muted">Lijst is leeg.</p>' : ''}`;
+            ${done.length ? `
+              <details class="done-block">
+                <summary>Afgevinkt / toegevoegd aan mand (${done.length})</summary>
+                ${done.map(i => `<div class="item done-item">
+                    <div>
+                      <div class="name">${esc(i.foodName)}</div>
+                      <div class="sub">${esc(i.picnicLabel || i.picnicUid || i.display)}</div>
+                    </div>
+                    <span class="tag">afgevinkt</span>
+                  </div>`).join('')}
+              </details>` : ''}
+
+            ${items.length === 0 ? '<p class="muted">Lijst is leeg.</p>' : ''}
+            ${items.length > 0 && open.length === 0
+              ? '<p class="muted">Alles op deze lijst is afgevinkt.</p>' : ''}`;
         }
 
         async function include(foodId) {
@@ -288,13 +455,17 @@ internal static class Html
         async function openItem(index) {
           const it = items[index];
           el.innerHTML = `<div class="bar"><button onclick="renderList()">&larr; terug</button>
-             <b>${esc(it.foodName)}</b></div>
+             <b>${esc(it.foodName)}</b>
+             ${it.picnicUid
+               ? `<span class="muted">gekoppeld aan
+                    ${esc(it.picnicLabel || it.picnicUid)}</span>`
+               : '<span class="muted">nog niet gekoppeld</span>'}</div>
              <div class="bar">
                <input id="term" value="${esc(it.foodName)}"
                       style="padding:7px 10px;border-radius:7px;border:1px solid #3a3d41;
                              background:#15171a;color:#e8eaed">
                <button onclick="search(${index})">Zoek</button>
-               <button class="danger" onclick="exclude('${it.foodId}')">Niet van Picnic</button>
+               <button class="danger" onclick="exclude('${it.foodId}')">Niet bij Picnic</button>
              </div>
              <div id="hits"><p class="muted">Zoeken...</p></div>`;
           search(index);
@@ -307,14 +478,28 @@ internal static class Html
           hits.innerHTML = '<p class="muted">Zoeken...</p>';
           try {
             const products = await jget('/api/search?term=' + encodeURIComponent(term));
+            lastProducts = products;
             if (!products.length) { hits.innerHTML = '<p class="muted">Geen resultaten.</p>'; return; }
-            hits.innerHTML = '<div class="grid">' + products.map(p => `
-              <button class="card" onclick="openProduct(${index},'${p.id}')">
+            hits.innerHTML = '<div class="grid">' + products.map(p => {
+              // The product this food currently points at, if any.
+              const isLinked = p.id === it.picnicUid;
+              return `
+              <button class="card${isLinked ? ' linked' : ''}"
+                      onclick="openProduct(${index},'${p.id}')">
                 ${p.imageId ? `<img src="/api/image/${p.imageId}" loading="lazy" alt="">`
                             : '<div style="height:104px"></div>'}
+                ${isLinked ? '<div class="badge">&check; gekoppeld</div>' : ''}
                 <div class="n">${esc(p.name)}</div>
                 <div class="p"><b>${esc(p.priceText)}</b> ${esc(p.unitQuantity)}</div>
-              </button>`).join('') + '</div>';
+              </button>`; }).join('') + '</div>';
+
+            // A linked product can fall outside the current result set, e.g. after
+            // renaming the food or when Picnic reshuffles its ranking.
+            if (it.picnicUid && !products.some(p => p.id === it.picnicUid)) {
+              hits.insertAdjacentHTML('afterbegin',
+                `<p class="muted">Huidige koppeling <b>${esc(it.picnicUid)}</b>`
+                + ' staat niet in deze resultaten.</p>');
+            }
           } catch (e) {
             if (e instanceof PicnicAuthError) {
               hits.innerHTML = '<p class="muted">Niet ingelogd bij Picnic. Inloggen...</p>';
@@ -335,16 +520,19 @@ internal static class Html
           try { detail = await jget('/api/product/' + encodeURIComponent(productId)); }
           catch (e) { /* detail page is a nice-to-have; linking works regardless */ }
 
+          const isLinked = productId === it.picnicUid;
+
           el.innerHTML = `
             <div class="bar"><button onclick="openItem(${index})">&larr; terug</button>
-              <b>${esc(productId)}</b></div>
+              <b>${esc(productId)}</b>
+              ${isLinked ? '<span class="badge">&check; gekoppeld</span>' : ''}</div>
             <div class="row">
               <div>
                 <p class="muted">Koppelen aan Mealie food <b>${esc(it.foodName)}</b></p>
                 <div class="bar">
                   <button class="primary" onclick="link(${index},'${productId}')">
-                    Kies dit product</button>
-                  <button class="danger" onclick="exclude('${it.foodId}')">Niet van Picnic</button>
+                    ${isLinked ? 'Koppeling opnieuw opslaan' : 'Kies dit product'}</button>
+                  <button class="danger" onclick="exclude('${it.foodId}')">Niet bij Picnic</button>
                 </div>
               </div>
             </div>
@@ -354,8 +542,10 @@ internal static class Html
 
         async function link(index, productId) {
           const it = items[index];
+          // Keep the product name alongside the id: a bare uid is undiagnosable later.
+          const label = lastProducts.find(p => p.id === productId)?.name ?? '';
           try {
-            await jpost('/api/link', {foodId: it.foodId, picnicUid: productId, label: ''});
+            await jpost('/api/link', {foodId: it.foodId, picnicUid: productId, label});
             await loadList();
           } catch (e) { alert('Opslaan mislukt: ' + e.message); }
         }
@@ -374,16 +564,18 @@ internal static class Html
           const log = document.getElementById('basketlog');
           log.innerHTML = '<div class="muted">Toevoegen...</div>';
           try {
-            const r = await jpost('/api/basket', {checkOff});
-            log.innerHTML = r.results.map(x => x.ok
-                ? `<div class="ok">&check; ${esc(x.name)} x${x.amount}</div>`
-                : `<div class="bad">&times; ${esc(x.name)}: ${esc(x.error)}</div>`).join('')
+            const r = await jpost('/api/basket', {checkOff, listId: currentList});
+            log.innerHTML = (r.results.length
+                ? r.results.map(x => x.ok
+                    ? `<div class="ok">&check; ${esc(x.name)} x${x.amount}</div>`
+                    : `<div class="bad">&times; ${esc(x.name)}: ${esc(x.error)}</div>`).join('')
+                : '<div class="muted">Niets toegevoegd: geen gekoppelde items op deze lijst.</div>')
               + (r.unmapped ? `<div class="muted">${r.unmapped} nog niet gekoppeld</div>` : '');
             if (checkOff) await loadList();
           } catch (e) { log.innerHTML = '<div class="bad">' + esc(e.message) + '</div>'; }
         }
 
-        refreshStatus().then(loadList);
+        refreshStatus().then(loadLists).then(loadList);
         </script>
         </html>
         """;

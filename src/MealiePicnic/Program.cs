@@ -98,9 +98,18 @@ api.MapGet("/picnic/status", async (PicnicClient picnic, CancellationToken ct) =
     Results.Ok(new
     {
         authenticated = await picnic.IsUsableAsync(ct),
-        // When true the UI asks for user/password instead of relying on env vars.
-        needsCredentials = picnic.NeedsCredentials,
+        // Lets the UI prefill the login dialog and say precisely what is missing.
+        // The username is safe to expose; the password never leaves the server.
+        hasConfiguredUser = picnic.HasConfiguredUser,
+        hasConfiguredPassword = picnic.HasConfiguredPassword,
+        configuredUser = picnic.ConfiguredUser,
     }));
+
+api.MapPost("/picnic/logout", async (PicnicClient picnic, CancellationToken ct) =>
+{
+    await picnic.LogoutAsync(ct);
+    return Results.Ok(new { loggedOut = true });
+});
 
 api.MapPost("/picnic/login", async (LoginRequest? body, PicnicClient picnic, CancellationToken ct) =>
 {
@@ -122,8 +131,13 @@ api.MapPost("/picnic/2fa/verify", async (Otp body, PicnicClient picnic, Cancella
 
 // ----------------------------------------------------------------- shopping list
 
-api.MapGet("/list", async (MealieClient mealie, CancellationToken ct) =>
-    Results.Ok(await mealie.GetItemsAsync(ct)));
+// All shopping lists, for the picker in the UI.
+api.MapGet("/lists", async (MealieClient mealie, AppOptions opt, CancellationToken ct) =>
+    Results.Ok(new { defaultName = opt.MealieList, lists = await mealie.GetListsAsync(ct) }));
+
+// listId is optional: omitted falls back to the MEALIE_LIST default.
+api.MapGet("/list", async (string? listId, MealieClient mealie, CancellationToken ct) =>
+    Results.Ok(await mealie.GetItemsAsync(listId, ct)));
 
 api.MapGet("/search", async (string term, PicnicClient picnic, CancellationToken ct) =>
     Results.Ok(await picnic.SearchAsync(term, ct)));
@@ -177,7 +191,7 @@ api.MapPost("/include", async (FoodRef body, MealieClient mealie, CancellationTo
 api.MapPost("/basket", async (BasketRequest body, MealieClient mealie, PicnicClient picnic,
                               CancellationToken ct) =>
 {
-    var items = await mealie.GetItemsAsync(ct);
+    var items = await mealie.GetItemsAsync(body.ListId, ct);
     var results = new List<CartResult>();
 
     foreach (var item in items.Where(i => i.State == LinkState.Linked && !i.Checked))
@@ -213,5 +227,5 @@ internal record TwoFactorChannel(string Channel);
 internal record Otp(string Code);
 internal record FoodRef(string FoodId);
 internal record LinkRequest(string FoodId, string PicnicUid, string? Label);
-internal record BasketRequest(bool CheckOff);
+internal record BasketRequest(bool CheckOff, string? ListId);
 internal record LoginRequest(string? User, string? Password);

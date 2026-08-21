@@ -177,11 +177,49 @@ public class PicnicClientTests
     }
 
     [Fact]
-    public void NeedsCredentials_is_true_when_password_absent()
+    public void Reports_which_credentials_configuration_provides()
+    {
+        // TestFactory.Options sets neither, so the UI must ask for both.
+        var client = TestFactory.Picnic(new StubHandler());
+
+        Assert.False(client.HasConfiguredUser);
+        Assert.False(client.HasConfiguredPassword);
+        Assert.True(client.NeedsCredentials);
+        Assert.Equal("", client.ConfiguredUser);
+    }
+
+    [Fact]
+    public async Task Logout_clears_the_cached_token()
+    {
+        var tokens = Tokens("tok");
+        var handler = new StubHandler().OnStatus("user/logout", HttpStatusCode.OK);
+
+        await TestFactory.Picnic(handler, tokens: tokens).LogoutAsync(default);
+
+        Assert.Null(tokens.Token);
+        Assert.Contains(handler.Sent, c => c.Url.Contains("user/logout"));
+    }
+
+    [Fact]
+    public async Task Logout_clears_the_token_even_when_the_remote_call_fails()
+    {
+        // Otherwise a token Picnic already rejects could never be cleared.
+        var tokens = Tokens("stale");
+        var handler = new StubHandler().OnStatus("user/logout", HttpStatusCode.Forbidden);
+
+        await TestFactory.Picnic(handler, tokens: tokens).LogoutAsync(default);
+
+        Assert.Null(tokens.Token);
+    }
+
+    [Fact]
+    public async Task Logout_without_a_token_does_not_call_picnic()
     {
         var handler = new StubHandler();
 
-        Assert.True(TestFactory.Picnic(handler).NeedsCredentials);
+        await TestFactory.Picnic(handler, tokens: Tokens()).LogoutAsync(default);
+
+        Assert.Empty(handler.Sent);
     }
 
     private sealed class HeaderInspector : StubHandler
