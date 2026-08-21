@@ -82,18 +82,31 @@ public sealed class PicnicClient(
 
     // ------------------------------------------------------------------ auth
 
+    /// <summary>True when credentials have to come from the caller.</summary>
+    public bool NeedsCredentials =>
+        options.PicnicUser.Length == 0 || options.PicnicPassword.Length == 0;
+
+    /// <summary>
+    /// Log in. Arguments win over the environment, so PICNIC_USER / PICNIC_PASSWORD
+    /// can be left unset in development and typed into the UI instead. Nothing is
+    /// stored: only the resulting auth token is persisted.
+    /// </summary>
     /// <returns>true when a second factor is still required.</returns>
-    public async Task<bool> LoginAsync(CancellationToken ct)
+    public async Task<bool> LoginAsync(string? user, string? password, CancellationToken ct)
     {
-        if (options.PicnicUser.Length == 0 || options.PicnicPassword.Length == 0)
-            throw new InvalidOperationException("PICNIC_USER / PICNIC_PASSWORD are not set.");
+        var key = string.IsNullOrWhiteSpace(user) ? options.PicnicUser : user.Trim();
+        var secretSource = string.IsNullOrEmpty(password) ? options.PicnicPassword : password;
+
+        if (key.Length == 0 || secretSource.Length == 0)
+            throw new PicnicCredentialsException(
+                "No Picnic credentials. Set PICNIC_USER / PICNIC_PASSWORD, or enter them in the UI.");
 
         var secret = Convert.ToHexStringLower(
-            MD5.HashData(Encoding.UTF8.GetBytes(options.PicnicPassword)));
+            MD5.HashData(Encoding.UTF8.GetBytes(secretSource)));
 
         var request = Build(HttpMethod.Post, "/user/login", new
         {
-            key = options.PicnicUser,
+            key,
             secret,
             client_id = 30100,
         });
@@ -225,3 +238,6 @@ public sealed class PicnicClient(
 }
 
 public sealed class PicnicAuthException(string message) : Exception(message);
+
+/// <summary>Raised when no credentials are available to log in with at all.</summary>
+public sealed class PicnicCredentialsException(string message) : Exception(message);
