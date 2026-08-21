@@ -37,6 +37,18 @@ public class IconsTests
     }
 
     [Fact]
+    public void Eu_organic_mark_is_a_usable_svg()
+    {
+        // Served as image/svg+xml from /icons, so it has to parse as SVG and carry
+        // the twelve stars of the EU mark -- a truncated file would render blank.
+        var svg = System.Text.Encoding.UTF8.GetString(MealiePicnic.Icons.EuOrganicSvg);
+
+        Assert.StartsWith("<svg", svg);
+        Assert.EndsWith("</svg>", svg.Trim());
+        Assert.Equal(12, System.Text.RegularExpressions.Regex.Matches(svg, "<polygon").Count);
+    }
+
+    [Fact]
     public void Manifest_theme_colour_matches_the_icon_background()
     {
         // Android tints the task switcher with theme_color; a mismatch against the

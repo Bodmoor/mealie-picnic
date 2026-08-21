@@ -221,6 +221,178 @@ public sealed class PicnicClient(
         }
     }
 
+    /// <summary>
+    /// Read the product page for the facts search results do not carry: organic
+    /// claim and salt per 100 g (issue #6).
+    ///
+    /// The page is a PML layout tree, so this looks up the blocks that belong to
+    /// THIS product by their node ids and reads only those. That scoping is the
+    /// point: the same page also carries "similar products", and a nearby organic
+    /// alternative must not lend its leaf to a conventional product. When Picnic
+    /// renames those ids the result is empty facts, never wrong ones.
+    /// </summary>
+    public async Task<PicnicDetails> GetDetailsAsync(string productId, CancellationToken ct)
+    {
+        var key = $"details:{productId}";
+        if (cache.TryGetValue(key, out PicnicDetails? hit) && hit is not null)
+            return hit;
+
+        // Same rule as the image id: never build a path from an unvalidated value.
+        if (!System.Text.RegularExpressions.Regex.IsMatch(productId, "^[A-Za-z0-9_-]{1,32}$"))
+            throw new ArgumentException("Invalid product id.", nameof(productId));
+
+        var path = $"/pages/product-details-page-root?id={Uri.EscapeDataString(productId)}";
+        var json = await SendAsync(Build(HttpMethod.Get, path), ct);
+
+        var details = json is null ? new PicnicDetails(productId, false, null, null)
+                                   : ReadDetails(productId, json, log);
+
+        cache.Set(key, details, new MemoryCacheEntryOptions
+        {
+            // Nutrition and certification do not change between deliveries.
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(12),
+            Size = 1024,
+        });
+        return details;
+    }
+
+    /// <summary>Parse a product page. Static and internal so tests can feed it a tree.</summary>
+    internal static PicnicDetails ReadDetails(string productId, JsonNode page, ILogger log)
+    {
+        // Blocks belonging to the product itself, in the order the app shows them.
+        var own = new[]
+        {
+            "product-details-page-root-main-container",   // name, brand, unit
+            "product-page-highlights",
+            "description",
+        };
+
+        var claims = new List<string>();
+        var found = false;
+        foreach (var id in own)
+        {
+            if (FindById(page, id) is not { } node) continue;
+            found = true;
+            Markdowns(node, claims);
+        }
+
+        // The accordion holds ingredients, nutrition and extra information. Its
+        // nutrition item is where the salt is; the rest still counts as claim text
+        // ("biologische tarwebloem" in an ingredient list means what it says).
+        var nutrition = new List<string>();
+        if (FindById(page, "accordion-list") is { } accordion)
+        {
+            found = true;
+            foreach (var (title, body) in Sections(accordion))
+            {
+                if (title.Contains("voedingswaarde", StringComparison.OrdinalIgnoreCase) ||
+                    title.Contains("nutrition", StringComparison.OrdinalIgnoreCase))
+                    nutrition.AddRange(body);
+                else
+                    claims.AddRange(body);
+            }
+        }
+
+        if (!found)
+        {
+            // Worth a warning: it means Picnic changed their page and both features
+            // are silently off until the node ids here are updated.
+            log.LogWarning("Product page for {Id} had none of the expected blocks", productId);
+            return new PicnicDetails(productId, false, null, null);
+        }
+
+        var salt = ProductFacts.ParseSalt(nutrition);
+        return new PicnicDetails(
+            Id: productId,
+            Organic: ProductFacts.IsOrganic(claims),
+            SaltGramsPer100: salt?.Grams,
+            SaltText: salt?.Text);
+    }
+
+    /// <summary>Depth-first search for the node carrying a given "id".</summary>
+    private static JsonNode? FindById(JsonNode node, string id)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+                if (obj["id"]?.GetValue<string>() == id) return obj;
+                foreach (var pair in obj)
+                    if (pair.Value is not null && FindById(pair.Value, id) is { } inObject)
+                        return inObject;
+                break;
+
+            case JsonArray array:
+                foreach (var child in array)
+                    if (child is not null && FindById(child, id) is { } inArray)
+                        return inArray;
+                break;
+        }
+        return null;
+    }
+
+    /// <summary>Every "markdown" string under a node, in document order.</summary>
+    private static void Markdowns(JsonNode node, List<string> into)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+                foreach (var pair in obj)
+                {
+                    if (pair.Key == "markdown" && pair.Value is JsonValue value &&
+                        value.TryGetValue<string>(out var text))
+                        into.Add(text);
+                    else if (pair.Value is not null)
+                        Markdowns(pair.Value, into);
+                }
+                break;
+
+            case JsonArray array:
+                foreach (var child in array)
+                    if (child is not null) Markdowns(child, into);
+                break;
+        }
+    }
+
+    /// <summary>The accordion's (header, body-text) pairs.</summary>
+    private static IEnumerable<(string Title, List<string> Body)> Sections(JsonNode accordion)
+    {
+        var items = FindItems(accordion);
+        if (items is null) yield break;
+
+        foreach (var item in items)
+        {
+            if (item is not JsonObject obj) continue;
+
+            var header = new List<string>();
+            if (obj["header"] is { } h) Markdowns(h, header);
+
+            var body = new List<string>();
+            if (obj["body"] is { } b) Markdowns(b, body);
+
+            yield return (ProductFacts.Clean(header.FirstOrDefault()), body);
+        }
+    }
+
+    private static JsonArray? FindItems(JsonNode node)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+                if (obj["items"] is JsonArray items) return items;
+                foreach (var pair in obj)
+                    if (pair.Value is not null && FindItems(pair.Value) is { } inObject)
+                        return inObject;
+                break;
+
+            case JsonArray array:
+                foreach (var child in array)
+                    if (child is not null && FindItems(child) is { } inArray)
+                        return inArray;
+                break;
+        }
+        return null;
+    }
+
     public async Task<byte[]> GetImageAsync(string imageId, string size, CancellationToken ct)
     {
         var key = $"img:{imageId}:{size}";

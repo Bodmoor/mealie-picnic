@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="assets\*.png" />
+    <EmbeddedResource Include="assets\*.svg" />
   </ItemGroup>
 
   <!-- Surface the root-level infra files in Solution Explorer so they are

@@ -111,6 +111,13 @@ public static class Html
           .card .n { font-size:12.5px; line-height:1.3; height:50px; overflow:hidden }
           .card .p { font-size:12px; color:#9aa0a6; margin-top:6px }
           .card .p b { color:#e8eaed }
+          /* Product facts (issue #6): reserve the height so cards do not jump
+             when the lazily fetched leaf and salt figure arrive. */
+          .card .f { min-height:19px; margin-top:5px; display:flex; align-items:center; gap:6px }
+          .card .f img { width:auto; height:15px; margin:0; background:none; border-radius:2px }
+          .salt { font-size:11.5px; color:#9aa0a6 }
+          .salt.hi { color:#e0a2a2 }
+          .salt.lo { color:#8fbf9a }
           pre { background:#111316; border:1px solid #2a2d31; border-radius:9px; padding:13px;
                 overflow:auto; max-height:440px; font-size:12px; color:#c9cdd2 }
           .row { display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap }
@@ -530,7 +537,12 @@ public static class Html
                 ${isLinked ? '<div class="badge">&check; gekoppeld</div>' : ''}
                 <div class="n">${esc(p.name)}</div>
                 <div class="p"><b>${esc(p.priceText)}</b> ${esc(p.unitQuantity)}</div>
+                <div class="f" data-facts="${esc(p.id)}"></div>
               </button>`; }).join('') + '</div>';
+
+            // Facts come from a per-product page fetch, so they load after the
+            // grid and only for what is on screen.
+            observeFacts(hits);
 
             // A linked product can fall outside the current result set, e.g. after
             // renaming the food or when Picnic reshuffles its ranking.
@@ -548,6 +560,66 @@ public static class Html
             }
             hits.innerHTML = '<p class="bad">' + esc(e.message) + '</p>';
           }
+        }
+
+        // ---------------------------------------------------------------- product facts
+
+        // Issue #6: the organic mark and the salt content per 100 g. Neither is in
+        // the search response -- each needs its own product-page fetch upstream --
+        // so they are fetched per card, and only once a card is near the viewport.
+        // A search for "melk" returns ninety products; eagerly fetching all of them
+        // would be ninety calls for a grid the user scrolls past.
+        const factsCache = new Map();
+        let factsObserver = null;
+
+        function observeFacts(root) {
+          // One observer per result set: the previous grid is gone, and its
+          // pending observations would keep it alive.
+          factsObserver?.disconnect();
+          factsObserver = new IntersectionObserver(entries => {
+            for (const entry of entries) {
+              if (!entry.isIntersecting) continue;
+              factsObserver.unobserve(entry.target);
+              loadFacts(entry.target);
+            }
+          }, { rootMargin: '250px' });
+
+          root.querySelectorAll('[data-facts]').forEach(node => factsObserver.observe(node));
+        }
+
+        async function loadFacts(node) {
+          const id = node.dataset.facts;
+          try {
+            if (!factsCache.has(id)) {
+              factsCache.set(id, await jget('/api/details/' + encodeURIComponent(id)));
+            }
+            node.innerHTML = factsHtml(factsCache.get(id));
+          } catch (e) {
+            // Deliberately silent. These are a nicety on top of the pick; failing
+            // to fetch them must not put an error in front of the user, and must
+            // never trigger the Picnic login dialog (the search already would have).
+            factsCache.delete(id);
+          }
+        }
+
+        function factsHtml(d) {
+          const out = [];
+          if (d.organic) {
+            out.push('<img src="/icons/eu-organic.svg" alt="Biologisch"'
+                     + ' title="Het product wordt op de Picnic-pagina als biologisch aangeduid">');
+          }
+          if (typeof d.saltGramsPer100 === 'number') {
+            const g = d.saltGramsPer100;
+            // The EU front-of-pack thresholds: 1.5 g salt per 100 g is "high",
+            // 0.3 g is "low". Colouring beats a number nobody can calibrate.
+            const cls = g > 1.5 ? 'salt hi' : (g <= 0.3 ? 'salt lo' : 'salt');
+            const text = (Math.round(g * 100) / 100).toString().replace('.', ',');
+            // esc() even though cls is one of three literals above: the audit test
+            // treats "attribute value without esc" as unconditional, and an
+            // exception is how the next one slips through.
+            out.push(`<span class="${esc(cls)}" title="Zout per 100 g">${esc(text)} g zout</span>`);
+          }
+          return out.join('');
         }
 
         // ---------------------------------------------------------------- detail view
