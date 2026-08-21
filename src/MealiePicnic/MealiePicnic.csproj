@@ -16,11 +16,6 @@
     <DockerfileContext>..\..</DockerfileContext>
   </PropertyGroup>
 
-  <!-- The PWA icons ship inside the assembly, so there is no wwwroot to deploy
-       and nothing to keep in sync next to the DLL. They live inside the project
-       directory, so the default resource naming (RootNamespace.folder.file)
-       already produces the names Icons.Load() looks up -- no LogicalName, no
-       Link, and the glob picks up a fourth icon automatically. -->
   <ItemGroup>
     <EmbeddedResource Include="assets\*.png" />
   </ItemGroup>
