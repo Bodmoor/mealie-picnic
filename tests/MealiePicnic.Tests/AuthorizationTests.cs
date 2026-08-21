@@ -203,4 +203,57 @@ public class AuthorizationTests
                         or System.Net.HttpStatusCode.NotFound,
             $"GET /logout returned {(int)response.StatusCode}; it must not succeed.");
     }
+
+    public static TheoryData<string, string> PwaAssets => new()
+    {
+        { "/favicon.ico", "image/png" },
+        { "/icons/192.png", "image/png" },
+        { "/icons/512.png", "image/png" },
+        { "/icons/maskable-512.png", "image/png" },
+        { "/manifest.webmanifest", "application/manifest+json" },
+        { "/sw.js", "text/javascript" },
+    };
+
+    [Theory]
+    [MemberData(nameof(PwaAssets))]
+    public async Task Pwa_assets_are_anonymous(string path, string contentType)
+    {
+        // Android fetches these before login; a 302 makes the app look
+        // uninstallable, so they must be reachable without a session.
+        using var factory = NewFactory();
+        var response = await NewClient(factory).GetAsync(path);
+
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(contentType, response.Content.Headers.ContentType?.MediaType);
+        Assert.NotEmpty(await response.Content.ReadAsByteArrayAsync());
+    }
+
+    [Fact]
+    public async Task Unknown_icon_name_is_not_found()
+    {
+        using var factory = NewFactory();
+        var response = await NewClient(factory).GetAsync("/icons/../appsettings.json");
+
+        Assert.NotEqual(System.Net.HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Manifest_declares_the_icons_it_serves()
+    {
+        using var factory = NewFactory();
+        var client = NewClient(factory);
+
+        var manifest = await client.GetStringAsync("/manifest.webmanifest");
+        using var json = System.Text.Json.JsonDocument.Parse(manifest);
+
+        Assert.Equal("standalone", json.RootElement.GetProperty("display").GetString());
+
+        // Every declared icon must actually resolve, or install silently fails.
+        foreach (var icon in json.RootElement.GetProperty("icons").EnumerateArray())
+        {
+            var src = icon.GetProperty("src").GetString()!;
+            var response = await client.GetAsync(src);
+            Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+        }
+    }
 }

@@ -9,6 +9,12 @@ public static class Html
         <!doctype html>
         <html lang="nl"><meta charset="utf-8">
         <meta name="viewport" content="width=device-width,initial-scale=1">
+        <link rel="icon" href="/favicon.ico" type="image/png">
+        <link rel="icon" href="/icons/192.png" sizes="192x192" type="image/png">
+        <link rel="apple-touch-icon" href="/icons/192.png">
+        <link rel="manifest" href="/manifest.webmanifest">
+        <meta name="theme-color" content="#1d2024">
+        <meta name="mobile-web-app-capable" content="yes">
         <title>Inloggen</title>
         <style>
           :root { color-scheme: dark }
@@ -37,6 +43,12 @@ public static class Html
         <!doctype html>
         <html lang="nl"><meta charset="utf-8">
         <meta name="viewport" content="width=device-width,initial-scale=1">
+        <link rel="icon" href="/favicon.ico" type="image/png">
+        <link rel="icon" href="/icons/192.png" sizes="192x192" type="image/png">
+        <link rel="apple-touch-icon" href="/icons/192.png">
+        <link rel="manifest" href="/manifest.webmanifest">
+        <meta name="theme-color" content="#1d2024">
+        <meta name="mobile-web-app-capable" content="yes">
         <title>Mealie &rarr; Picnic</title>
         <style>
           :root { color-scheme: dark }
@@ -567,6 +579,13 @@ public static class Html
               + (r.unmapped ? `<div class="muted">${r.unmapped} nog niet gekoppeld</div>` : '');
             if (checkOff) await loadList();
           } catch (e) { log.innerHTML = '<div class="bad">' + esc(e.message) + '</div>'; }
+        }
+
+        // Registering the service worker is what makes Android offer "install".
+        // Requires a secure context: HTTPS, or localhost. Over plain HTTP on a LAN
+        // address this silently does nothing -- expected, not an error.
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.register('/sw.js').catch(() => { /* not a secure context */ });
         }
 
         refreshStatus().then(loadLists).then(loadList);

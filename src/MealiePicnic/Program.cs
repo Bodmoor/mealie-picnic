@@ -140,6 +140,42 @@ app.Use(async (ctx, next) =>
     }
 });
 
+// ----------------------------------------------------------------- pwa assets
+// All anonymous: Android fetches the manifest, icons and service worker before
+// (and independently of) login, and a 302-to-login makes the app look
+// uninstallable. None of this leaks anything -- it is static branding.
+var week = "public, max-age=604800";
+
+// Browsers request /favicon.ico unprompted; serving a PNG under that path is
+// fine (the Content-Type is what matters, and nosniff keeps it honest).
+app.MapGet("/favicon.ico", (HttpContext ctx) =>
+{
+    ctx.Response.Headers.CacheControl = week;
+    return Results.File(Icons.Png192, "image/png");
+}).AllowAnonymous();
+
+app.MapGet("/icons/{name}", (string name, HttpContext ctx) =>
+{
+    var bytes = name switch
+    {
+        "192.png" => Icons.Png192,
+        "512.png" => Icons.Png512,
+        "maskable-512.png" => Icons.PngMaskable512,
+        _ => null,
+    };
+    if (bytes is null) return Results.NotFound();
+
+    ctx.Response.Headers.CacheControl = week;
+    return Results.File(bytes, "image/png");
+}).AllowAnonymous();
+
+app.MapGet("/manifest.webmanifest", () =>
+    Results.Content(Icons.Manifest, "application/manifest+json")).AllowAnonymous();
+
+app.MapGet("/sw.js", () =>
+    // No caching: a stale service worker is how PWAs get stuck on old code.
+    Results.Content(Icons.ServiceWorker, "text/javascript")).AllowAnonymous();
+
 // Static files (the SPA) are behind auth too, hence no UseStaticFiles() before this.
 app.MapGet("/login", () => Results.Content(Html.LoginPage, "text/html"))
    .AllowAnonymous();
