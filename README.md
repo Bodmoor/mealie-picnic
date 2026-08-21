@@ -12,6 +12,7 @@ reused by every recipe that uses that ingredient:
 | `picnic_uid`   | Picnic selling-unit id, e.g. `s1005080`          |
 | `picnic`       | `"true"` linked · `"false"` never buy at Picnic   |
 | `picnic_label` | product name at time of linking, for diagnostics |
+| `picnic_pack`  | Picnic's pack size at linking, e.g. `1 kg` or `6 stuks`   |
 
 Items with no picnic extras at all are shown first as **nieuw**. Items with
 `picnic == "false"` are hidden behind a toggle, where the setting can be reverted.
@@ -151,8 +152,11 @@ POST /cart/add_product    {product_id, count}
 ## Caveats
 
 * Everything Picnic-side is unofficial and can break when they change their app.
-* Quantities: Mealie items added without an amount have `quantity: 0`, so the app adds
-  1 of each. Pack sizes are not reconciled — 300 g of flour and a 1 kg bag both count as one.
+* Quantities: a Mealie line's `quantity` only means "how many to buy" when the unit is
+  countable (`stuks`, or no unit). For mass and volume the app buys one pack, unless
+  `picnic_pack` is known and smaller than needed — 2 kg against 1 kg bags is two. Any
+  line is capped at `Quantities.MaxPerItem` so a mis-parsed unit costs one basket slot
+  rather than fifty.
 * Auth is a single shared password behind a rate-limited login. The compose file
   publishes on loopback only; for ANY exposure beyond that, a TLS-terminating
   reverse proxy is required, with `COOKIE_SECURE=true` and `TRUST_PROXY=true` set —

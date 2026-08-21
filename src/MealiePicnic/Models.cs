@@ -32,13 +32,35 @@ public sealed record ShoppingItem(
     string Display,
     string FoodName,
     double Quantity,
+    string Unit,
     string Label,
     bool Checked,
     LinkState State,
     string? PicnicUid,
-    string? PicnicLabel)
+    string? PicnicLabel,
+    string? PicnicPack)
 {
-    public int Amount => Quantity >= 1 ? (int)Math.Ceiling(Quantity) : 1;
+    /// <summary>
+    /// How many packs to add. Quantity alone is not enough: "500 gram" must not
+    /// become 500 packs, which is what happened before Unit was taken into
+    /// account (issue #5).
+    /// </summary>
+    public int Amount => Quantities.Required(Quantity, Unit, PicnicPack);
+
+    /// <summary>Short explanation of the amount, for the UI.</summary>
+    public string AmountReason
+    {
+        get
+        {
+            if (Amount == 1 && Quantities.ResolveUnit(Unit).Dimension is not Dimension.Count)
+                return string.IsNullOrWhiteSpace(PicnicPack)
+                    ? "1 pak (geen pakgrootte bekend)"
+                    : $"1 x {PicnicPack}";
+            return string.IsNullOrWhiteSpace(PicnicPack)
+                ? $"{Amount} x"
+                : $"{Amount} x {PicnicPack}";
+        }
+    }
 }
 
 /// <summary>A Mealie shopping list, for the picker.</summary>

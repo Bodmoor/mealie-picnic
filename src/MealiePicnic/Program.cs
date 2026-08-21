@@ -305,6 +305,8 @@ api.MapPost("/link", async (LinkRequest? body, MealieClient mealie, Cancellation
         [MealieClient.ExtraUid] = body.PicnicUid,
         [MealieClient.ExtraFlag] = "true",
         [MealieClient.ExtraLabel] = body.Label ?? "",
+        // Stored so the basket can work out how many packs a weight needs.
+        [MealieClient.ExtraPack] = body.Pack ?? "",
     }, ct);
     return Results.Ok(new { ok = true, extras });
 });
@@ -402,7 +404,7 @@ app.Run();
 internal record TwoFactorChannel(string? Channel);
 internal record Otp(string? Code);
 internal record FoodRef(string FoodId);
-internal record LinkRequest(string FoodId, string PicnicUid, string? Label);
+internal record LinkRequest(string FoodId, string PicnicUid, string? Label, string? Pack);
 internal record BasketRequest(bool CheckOff, string? ListId);
 internal record LoginRequest(string? User, string? Password);
 

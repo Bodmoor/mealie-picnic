@@ -13,6 +13,8 @@ public sealed class MealieClient(HttpClient http, AppOptions options, ILogger<Me
     public const string ExtraUid = "picnic_uid";
     public const string ExtraFlag = "picnic";
     public const string ExtraLabel = "picnic_label";
+    /// <summary>Picnic's unit_quantity at link time, e.g. "1 kg" or "6 stuks".</summary>
+    public const string ExtraPack = "picnic_pack";
 
     /// <summary>
     /// All Mealie ids interpolated into paths or query strings are UUIDs. Enforcing
@@ -110,11 +112,16 @@ public sealed class MealieClient(HttpClient http, AppOptions options, ILogger<Me
                 Display: node["display"]?.GetValue<string>() ?? "",
                 FoodName: food["name"]?.GetValue<string>() ?? "",
                 Quantity: node["quantity"]?.GetValue<double>() ?? 0,
+                // Without the unit, "500 gram" is indistinguishable from "500 items".
+                Unit: node["unit"]?["name"]?.GetValue<string>()
+                      ?? node["unit"]?["abbreviation"]?.GetValue<string>()
+                      ?? "",
                 Label: node["label"]?["name"]?.GetValue<string>() ?? "",
                 Checked: node["checked"]?.GetValue<bool>() ?? false,
                 State: state,
                 PicnicUid: uid,
-                PicnicLabel: extras?[ExtraLabel]?.GetValue<string>()));
+                PicnicLabel: extras?[ExtraLabel]?.GetValue<string>(),
+                PicnicPack: extras?[ExtraPack]?.GetValue<string>()));
         }
 
         // 'New' first: those are the ones needing a decision.
