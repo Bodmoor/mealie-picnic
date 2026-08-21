@@ -1,9 +1,15 @@
+# Validates every PR (and the merge commit on main). This is the required check
+# for branch protection on main: publishing (docker-publish.yml) relies on it.
 name: CI
 
 on:
+  pull_request:
   push:
     branches: [main]
-  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-test:
@@ -29,7 +35,11 @@ jobs:
         # in the log without failing the build. Tighten once the baseline is clean.
         run: dotnet list package --vulnerable --include-transitive || true
 
+  # PR-only: proves the Dockerfile still builds and that no secret can reach a
+  # layer. On main the publish workflow builds (and re-checks) the real image,
+  # so building here again would be duplicate work.
   docker:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,8 +48,6 @@ jobs:
         run: docker build -t mealie-picnic:ci .
 
       - name: Assert no secrets in the build context
-        # F1 regression guard: a local dev token under src/**/data must never
-        # reach a layer. The build stage would have copied it with src/.
         run: |
           docker build --target build -t mealie-picnic:build-stage .
           docker run --rm --entrypoint sh mealie-picnic:build-stage \
