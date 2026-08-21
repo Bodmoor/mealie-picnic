@@ -1,0 +1,24 @@
+services:
+  mealie-picnic:
+    build: .
+    container_name: mealie-picnic
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # --- web UI login ---
+      APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in .env}
+
+      # --- Mealie ---
+      MEALIE_URL: ${MEALIE_URL}
+      MEALIE_TOKEN: ${MEALIE_TOKEN}
+      MEALIE_LIST: ${MEALIE_LIST:-Boodschappen}
+
+      # --- Picnic ---
+      PICNIC_USER: ${PICNIC_USER}
+      PICNIC_PASSWORD: ${PICNIC_PASSWORD}
+      PICNIC_COUNTRY: ${PICNIC_COUNTRY:-NL}
+
+      SEARCH_CACHE_MINUTES: ${SEARCH_CACHE_MINUTES:-30}
+    volumes:
+      - ./data:/data

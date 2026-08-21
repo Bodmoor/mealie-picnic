@@ -1,0 +1,23 @@
+{
+  "profiles": {
+    "MealiePicnic": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "applicationUrl": "https://localhost:50069;http://localhost:50070",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+
+        "APP_PASSWORD": "dev",
+        "DATA_DIR": "..\\..\\..\\data",
+
+        "MEALIE_URL": "https://mealie.change-me.nl",
+        "MEALIE_TOKEN": "paste-a-mealie-api-token",
+        "MEALIE_LIST": "Boodschappen",
+
+        "PICNIC_USER": "you@example.com",
+        "PICNIC_PASSWORD": "change-me",
+        "PICNIC_COUNTRY": "NL"
+      }
+    }
+  }
+}
