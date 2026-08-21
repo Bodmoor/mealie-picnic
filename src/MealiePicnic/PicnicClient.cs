@@ -221,26 +221,6 @@ public sealed class PicnicClient(
         }
     }
 
-    /// <summary>Raw product detail page. Returned to the UI verbatim.</summary>
-    public async Task<JsonNode?> GetProductPageAsync(string productId, CancellationToken ct)
-    {
-        var key = $"product:{productId}";
-        if (cache.TryGetValue(key, out JsonNode? hit) && hit is not null)
-            return hit;
-
-        var path = $"/pages/product-details-page-root?id={Uri.EscapeDataString(productId)}" +
-                   "&show_category_action=true&show_remove_from_purchases_page_action=true";
-        var json = await SendAsync(Build(HttpMethod.Get, path), ct);
-
-        if (json is not null)
-            cache.Set(key, json, new MemoryCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(options.SearchCacheMinutes),
-                Size = 512 * 1024,     // nominal: product page trees are large JSON
-            });
-        return json;
-    }
-
     public async Task<byte[]> GetImageAsync(string imageId, string size, CancellationToken ct)
     {
         var key = $"img:{imageId}:{size}";
