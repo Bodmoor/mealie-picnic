@@ -578,3 +578,8 @@ FodyWeavers.xsd
 # End of https://www.toptal.com/developers/gitignore/api/visualstudio,visualstudiocode,macos,windows,linux,aspnetcore
 /Examples/cert/_cert.pem
 /Examples/Ecare.Examples.ExampleMicroFrontend/wwwroot
+
+# mealie-picnic: local secrets and state
+data/
+.env
+**/launchSettings.json

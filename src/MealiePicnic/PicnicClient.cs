@@ -101,6 +101,12 @@ public sealed class PicnicClient(
         request.Headers.Remove("x-picnic-auth");
 
         var json = await SendAsync(request, ct);
+
+        // Picnic answers bad credentials with HTTP 200 and an error body, so the
+        // status code alone is not enough to tell whether the login worked.
+        if (json?["error"]?["code"]?.GetValue<string>() is { Length: > 0 } code)
+            throw new PicnicAuthException($"Picnic login refused ({code}). Check PICNIC_USER / PICNIC_PASSWORD.");
+
         var needs2fa = json?["second_factor_authentication_required"]?.GetValue<bool>() ?? false;
 
         log.LogInformation("Picnic login ok, 2FA required: {Needs2fa}", needs2fa);

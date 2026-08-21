@@ -113,20 +113,34 @@ internal static class Html
         <script>
         let items = [], showExcluded = false;
 
+        // Whatever we were doing when Picnic asked us to authenticate, so it can
+        // be resumed once login (and any 2FA) completes.
+        let pendingRetry = null;
+
+        async function runPending() {
+          const retry = pendingRetry;
+          pendingRetry = null;
+          if (retry) await retry();
+        }
+
         const el = document.getElementById('view');
         const esc = s => String(s ?? '').replace(/[&<>"]/g,
           c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-        async function jget(url) {
-          const r = await fetch(url);
-          if (!r.ok) throw new Error(await r.text());
-          return r.json();
+        // A 401 with error 'picnic_auth' means the Picnic token is missing or
+        // not 2FA-verified. Callers turn that into the login dialog.
+        class PicnicAuthError extends Error {}
+
+        async function handle(r) {
+          if (r.ok) return r.json();
+          const text = await r.text();
+          if (r.status === 401 && text.includes('picnic_auth')) throw new PicnicAuthError(text);
+          throw new Error(text);
         }
+        async function jget(url) { return handle(await fetch(url)); }
         async function jpost(url, body) {
-          const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
-                                      body: JSON.stringify(body ?? {})});
-          if (!r.ok) throw new Error(await r.text());
-          return r.json();
+          return handle(await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
+                                          body: JSON.stringify(body ?? {})}));
         }
 
         // ---------------------------------------------------------------- picnic auth
@@ -143,9 +157,15 @@ internal static class Html
         async function picnicLogin() {
           try {
             const r = await jpost('/api/picnic/login');
-            if (r.needs2fa) document.getElementById('twofa').showModal();
-            else await refreshStatus();
-          } catch (e) { alert('Login mislukt: ' + e.message); }
+            if (r.needs2fa) { document.getElementById('twofa').showModal(); return; }
+            await refreshStatus();
+            await runPending();
+          } catch (e) {
+            // A refused login also arrives as picnic_auth, but means wrong credentials.
+            alert(e instanceof PicnicAuthError
+              ? 'Picnic weigerde de login. Controleer PICNIC_USER / PICNIC_PASSWORD.'
+              : 'Login mislukt: ' + e.message);
+          }
         }
 
         async function send2fa(channel) {
@@ -160,6 +180,7 @@ internal static class Html
             await jpost('/api/picnic/2fa/verify', {code: document.getElementById('otp').value.trim()});
             document.getElementById('twofa').close();
             await refreshStatus();
+            await runPending();
           } catch (e) { alert('Verificatie mislukt: ' + e.message); }
         }
 
@@ -259,7 +280,15 @@ internal static class Html
                 <div class="n">${esc(p.name)}</div>
                 <div class="p"><b>${esc(p.priceText)}</b> ${esc(p.unitQuantity)}</div>
               </button>`).join('') + '</div>';
-          } catch (e) { hits.innerHTML = '<p class="bad">' + esc(e.message) + '</p>'; }
+          } catch (e) {
+            if (e instanceof PicnicAuthError) {
+              hits.innerHTML = '<p class="muted">Niet ingelogd bij Picnic. Inloggen...</p>';
+              pendingRetry = () => search(index);
+              await picnicLogin();
+              return;
+            }
+            hits.innerHTML = '<p class="bad">' + esc(e.message) + '</p>';
+          }
         }
 
         // ---------------------------------------------------------------- detail view
