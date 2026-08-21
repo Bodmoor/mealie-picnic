@@ -25,6 +25,36 @@ Open <http://localhost:8080>, log in with `APP_PASSWORD`, then press **Picnic lo
 The first login triggers 2FA: pick SMS or e-mail, type the code, done. The resulting
 token is cached in `./data/picnic-token` and is valid for months, so this is rare.
 
+## Local development
+
+Configuration is read in the standard ASP.NET Core order:
+
+```
+appsettings.json  <  user secrets (Development only)  <  environment variables
+```
+
+So the same flat keys work in Docker (env vars) and locally (user secrets), and no
+secret needs to live in `launchSettings.json` — which is easy to commit by accident.
+
+```bash
+cd src/MealiePicnic
+dotnet user-secrets set "MEALIE_TOKEN"    "paste-a-mealie-api-token"
+dotnet user-secrets set "PICNIC_USER"     "you@example.com"
+dotnet user-secrets set "PICNIC_PASSWORD" "your-picnic-password"
+dotnet user-secrets list
+```
+
+These land in `%APPDATA%\Microsoft\UserSecrets\mealie-picnic\secrets.json`, outside
+the repository. The `UserSecretsId` is already set in `MealiePicnic.csproj`.
+
+**Environment variables win over user secrets.** A key left in `launchSettings.json`
+silently shadows the secret, even when set to an empty string — remove it there rather
+than blanking it. `launchSettings.json` is gitignored; `launchSettings.example.json`
+shows the non-secret keys that belong in it.
+
+The Picnic credentials are optional even as secrets: leave them unset and the web UI
+asks for them at login instead. Only the resulting auth token is persisted, to `DATA_DIR`.
+
 ## Configuration
 
 All via environment variables.
@@ -33,7 +63,7 @@ All via environment variables.
 | ---------------------- | -------- | -------------- | ----------------------------------------- |
 | `APP_PASSWORD`         | yes      | —              | password for the web UI                   |
 | `MEALIE_URL`           | yes      | —              | e.g. `https://mealie.local`               |
-| `MEALIE_TOKEN`         | yes      | —              | Mealie → Profile → API Tokens             |
+| `MEALIE_TOKEN`         | yes      | —              | Mealie → Profile → API Tokens; user secret locally |
 | `MEALIE_LIST`          | no       | `Boodschappen` | shopping list name                        |
 | `PICNIC_USER`          | no*      | —              | *needed until a token is cached           |
 | `PICNIC_PASSWORD`      | no*      | —              |                                           |

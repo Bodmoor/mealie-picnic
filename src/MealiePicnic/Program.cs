@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var options = AppOptions.FromEnvironment();
+var options = AppOptions.FromConfiguration(builder.Configuration);
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<TokenStore>();
 builder.Services.AddMemoryCache();
@@ -48,6 +48,11 @@ app.Use(async (ctx, next) =>
     {
         ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
         await ctx.Response.WriteAsJsonAsync(new { error = "picnic_auth", message = ex.Message });
+    }
+    catch (PicnicCredentialsException ex)
+    {
+        ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await ctx.Response.WriteAsJsonAsync(new { error = "picnic_credentials", message = ex.Message });
     }
 });
 
@@ -90,11 +95,16 @@ var api = app.MapGroup("/api").RequireAuthorization();
 // ----------------------------------------------------------------- picnic auth
 
 api.MapGet("/picnic/status", async (PicnicClient picnic, CancellationToken ct) =>
-    Results.Ok(new { authenticated = await picnic.IsUsableAsync(ct) }));
+    Results.Ok(new
+    {
+        authenticated = await picnic.IsUsableAsync(ct),
+        // When true the UI asks for user/password instead of relying on env vars.
+        needsCredentials = picnic.NeedsCredentials,
+    }));
 
-api.MapPost("/picnic/login", async (PicnicClient picnic, CancellationToken ct) =>
+api.MapPost("/picnic/login", async (LoginRequest? body, PicnicClient picnic, CancellationToken ct) =>
 {
-    var needs2fa = await picnic.LoginAsync(ct);
+    var needs2fa = await picnic.LoginAsync(body?.User, body?.Password, ct);
     return Results.Ok(new { needs2fa });
 });
 
@@ -204,3 +214,4 @@ internal record Otp(string Code);
 internal record FoodRef(string FoodId);
 internal record LinkRequest(string FoodId, string PicnicUid, string? Label);
 internal record BasketRequest(bool CheckOff);
+internal record LoginRequest(string? User, string? Password);

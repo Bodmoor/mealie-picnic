@@ -96,6 +96,18 @@ internal static class Html
 
         <div id="view"></div>
 
+        <dialog id="creds">
+          <b>Picnic inloggen</b>
+          <p class="muted">PICNIC_PASSWORD is niet ingesteld, dus vul hier je gegevens in.
+             Ze worden niet opgeslagen; alleen het token wordt bewaard.</p>
+          <input id="cuser" placeholder="E-mailadres" autocomplete="username">
+          <input id="cpass" type="password" placeholder="Wachtwoord" autocomplete="current-password">
+          <div class="bar">
+            <button class="primary" onclick="submitCreds()">Inloggen</button>
+            <button onclick="document.getElementById('creds').close()">Sluiten</button>
+          </div>
+        </dialog>
+
         <dialog id="twofa">
           <b>Picnic 2FA</b>
           <p class="muted" id="twofaMsg">Kies waar de code naartoe moet.</p>
@@ -145,9 +157,12 @@ internal static class Html
 
         // ---------------------------------------------------------------- picnic auth
 
+        let needsCreds = false;
+
         async function refreshStatus() {
           try {
             const s = await jget('/api/picnic/status');
+            needsCreds = s.needsCredentials;
             document.getElementById('pstatus').textContent =
               'Picnic: ' + (s.authenticated ? 'ingelogd' : 'niet ingelogd');
             return s.authenticated;
@@ -155,15 +170,35 @@ internal static class Html
         }
 
         async function picnicLogin() {
+          // No password in the environment (dev mode): collect it in the browser first.
+          if (needsCreds) { document.getElementById('creds').showModal(); return; }
+          await doLogin();
+        }
+
+        async function submitCreds() {
+          const user = document.getElementById('cuser').value.trim();
+          const pass = document.getElementById('cpass').value;
+          if (!user || !pass) { alert('Vul beide velden in.'); return; }
+          document.getElementById('creds').close();
+          document.getElementById('cpass').value = '';
+          await doLogin({user, password: pass});
+        }
+
+        async function doLogin(creds) {
           try {
-            const r = await jpost('/api/picnic/login');
+            const r = await jpost('/api/picnic/login', creds);
             if (r.needs2fa) { document.getElementById('twofa').showModal(); return; }
             await refreshStatus();
             await runPending();
           } catch (e) {
             // A refused login also arrives as picnic_auth, but means wrong credentials.
+            if (e.message.includes('picnic_credentials')) {
+              needsCreds = true;
+              document.getElementById('creds').showModal();
+              return;
+            }
             alert(e instanceof PicnicAuthError
-              ? 'Picnic weigerde de login. Controleer PICNIC_USER / PICNIC_PASSWORD.'
+              ? 'Picnic weigerde de login. Controleer de gegevens.'
               : 'Login mislukt: ' + e.message);
           }
         }

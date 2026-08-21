@@ -26,10 +26,24 @@ public sealed class AppOptions
     public string PicnicImageBaseUrl =>
         $"https://storefront-prod.{PicnicCountry.ToLowerInvariant()}.picnicinternational.com/static/images";
 
-    public static AppOptions FromEnvironment()
+    /// <summary>
+    /// Reads configuration in the standard ASP.NET Core order, so the same flat key
+    /// names work everywhere:
+    ///
+    ///   appsettings.json  &lt;  user secrets (Development only)  &lt;  environment variables
+    ///
+    /// In Docker the env vars are the only source. Locally, keep secrets out of
+    /// launchSettings.json (which is easy to commit by accident) and use:
+    ///
+    ///   dotnet user-secrets set "MEALIE_TOKEN" "..."   --project src/MealiePicnic
+    ///
+    /// Note env vars WIN over user secrets, so a key left in launchSettings.json
+    /// will silently shadow the secret. Remove it there rather than blanking it.
+    /// </summary>
+    public static AppOptions FromConfiguration(IConfiguration configuration)
     {
         string Get(string key, string fallback = "") =>
-            Environment.GetEnvironmentVariable(key) is { Length: > 0 } v ? v : fallback;
+            configuration[key] is { Length: > 0 } v ? v : fallback;
 
         var options = new AppOptions
         {
@@ -45,12 +59,17 @@ public sealed class AppOptions
             SearchCacheMinutes = int.TryParse(Get("SEARCH_CACHE_MINUTES"), out var m) ? m : 30,
         };
 
+        // Picnic credentials are deliberately not required: they can be typed into
+        // the UI instead. These three have no such fallback.
         var missing = new List<string>();
         if (options.MealieUrl.Length == 0) missing.Add("MEALIE_URL");
         if (options.MealieToken.Length == 0) missing.Add("MEALIE_TOKEN");
         if (options.AppPassword.Length == 0) missing.Add("APP_PASSWORD");
         if (missing.Count > 0)
-            throw new InvalidOperationException("Missing env vars: " + string.Join(", ", missing));
+            throw new InvalidOperationException(
+                "Missing configuration: " + string.Join(", ", missing) +
+                ". Set them as environment variables, or for local development with " +
+                "`dotnet user-secrets set \"<KEY>\" \"<value>\" --project src/MealiePicnic`.");
 
         return options;
     }
