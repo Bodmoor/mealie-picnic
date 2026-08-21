@@ -88,14 +88,14 @@ All via environment variables.
 | `PICNIC_PASSWORD`      | no*      | —              |                                           |
 | `PICNIC_COUNTRY`       | no       | `NL`           | `NL`, `DE`, `FR`                          |
 | `PICNIC_API_VERSION`   | no       | `15`           | bump if Picnic starts returning 400s      |
-| `SEARCH_CACHE_MINUTES` | no       | `30`           | in-memory cache for searches and details  |
+| `SEARCH_CACHE_MINUTES` | no       | `30`           | in-memory cache for searches; product pages are held 12 h |
 | `DATA_DIR`             | no       | `/data`        | volume for the token and device id        |
 | `COOKIE_SECURE`        | no       | `false`        | force Secure on the session cookie (needs TLS) |
 | `TRUST_PROXY`          | no       | `false`        | honour X-Forwarded-* from a reverse proxy |
 
 ## Icons
 
-The three PNGs in `src/MealiePicnic/assets/` are
+The three PNGs and `eu-organic.svg` in `src/MealiePicnic/assets/` are
 compiled into the assembly as embedded resources, so there is no `wwwroot` to deploy.
 Replace the files to change the icon; the maskable one needs its art inset by about
 20% or Android's circular crop clips it.
@@ -117,6 +117,9 @@ sent to Mealie — which is where the sharp edges are:
   and deduplicated, 403 mapped to `PicnicAuthException`, bad credentials returned as
   HTTP 200 with an error body still treated as failure, and the refreshed
   `x-picnic-auth` header captured after 2FA.
+* `ProductFactsTests` — the organic and salt readers, weighted towards the false
+  positives: "biologisch afbreekbaar" is biodegradable packaging, not organic food,
+  and a "per 100 g" heading is not a salt figure.
 * `AppOptionsTests` — defaults, required keys, and blank values falling through.
 * `TokenStoreTests` — the token survives a restart, so 2FA stays rare.
 
@@ -152,6 +155,15 @@ POST /cart/add_product    {product_id, count}
 ## Caveats
 
 * Everything Picnic-side is unofficial and can break when they change their app.
+* **Organic mark and salt are read from text, not from data.** Picnic publishes neither
+  as a field: the product page carries an organic claim in prose and the nutrition table
+  as markdown, so `ProductFacts` recovers both by reading. Consequences to keep in mind:
+  a product with no visible leaf may still be organic (nothing on its page said so), and
+  the salt figure is only as good as the table it was parsed from. Both are scoped to the
+  product's own page blocks, deliberately excluding the "similar products" strip — a leaf
+  borrowed from a suggested organic alternative would be worse than no leaf at all. When
+  Picnic renames those blocks, both facts go quiet rather than wrong, and a warning is
+  logged.
 * Quantities: a Mealie line's `quantity` only means "how many to buy" when the unit is
   countable (`stuks`, or no unit). For mass and volume the app buys one pack, unless
   `picnic_pack` is known and smaller than needed — 2 kg against 1 kg bags is two. Any

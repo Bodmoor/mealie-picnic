@@ -35,6 +35,13 @@ public static class Icons
     public static byte[] PngMaskable512 { get; } = Load("icon-maskable-512.png");
 
     /// <summary>
+    /// The EU organic mark (twelve stars in a leaf, on the regulation green),
+    /// shown on products whose page claims they are organic. SVG because it is
+    /// rendered at badge size next to the price and must stay legible.
+    /// </summary>
+    public static byte[] EuOrganicSvg { get; } = Load("eu-organic.svg");
+
+    /// <summary>
     /// Web app manifest. Served from a route (not a file) so it can be marked
     /// AllowAnonymous: Android fetches it before the user has logged in, and a
     /// 302-to-login would make the app look uninstallable.

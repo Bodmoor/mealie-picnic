@@ -156,17 +156,18 @@ app.MapGet("/favicon.ico", (HttpContext ctx) =>
 
 app.MapGet("/icons/{name}", (string name, HttpContext ctx) =>
 {
-    var bytes = name switch
+    (byte[]? bytes, string type) = name switch
     {
-        "192.png" => Icons.Png192,
-        "512.png" => Icons.Png512,
-        "maskable-512.png" => Icons.PngMaskable512,
-        _ => null,
+        "192.png" => (Icons.Png192, "image/png"),
+        "512.png" => (Icons.Png512, "image/png"),
+        "maskable-512.png" => (Icons.PngMaskable512, "image/png"),
+        "eu-organic.svg" => (Icons.EuOrganicSvg, "image/svg+xml"),
+        _ => ((byte[]?)null, ""),
     };
     if (bytes is null) return Results.NotFound();
 
     ctx.Response.Headers.CacheControl = week;
-    return Results.File(bytes, "image/png");
+    return Results.File(bytes, type);
 }).AllowAnonymous();
 
 app.MapGet("/manifest.webmanifest", () =>
@@ -279,6 +280,18 @@ api.MapGet("/list", async (string? listId, MealieClient mealie, CancellationToke
 
 api.MapGet("/search", async (string term, PicnicClient picnic, CancellationToken ct) =>
     Results.Ok(await picnic.SearchAsync(term, ct)));
+
+// Organic claim and salt per 100 g, read from the product page (issue #6). Its own
+// endpoint because the search response cannot carry it: one page fetch per product
+// would turn a search into ninety upstream calls, so the UI asks per card, only
+// for cards that actually come into view, and both sides cache.
+api.MapGet("/details/{productId}", async (string productId, PicnicClient picnic, CancellationToken ct) =>
+{
+    if (!Regex.IsMatch(productId, "^[A-Za-z0-9_-]{1,32}$"))
+        return Results.BadRequest(new { error = "invalid_product_id" });
+
+    return Results.Ok(await picnic.GetDetailsAsync(productId, ct));
+});
 
 api.MapGet("/image/{imageId}", async (string imageId, PicnicClient picnic, CancellationToken ct) =>
 {

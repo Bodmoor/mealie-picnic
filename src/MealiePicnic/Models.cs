@@ -15,6 +15,21 @@ public sealed record PicnicProduct(
         : "";
 }
 
+/// <summary>
+/// The facts Picnic only publishes on the product page (issue #6): whether the
+/// product is organic, and its salt content per 100 g.
+///
+/// Both are optional by design. <see cref="Organic"/> false means "no organic
+/// claim found", not "conventional", and a null <see cref="SaltGramsPer100"/>
+/// means the nutrition table could not be read -- neither is worth showing as a
+/// negative, so the UI simply omits what it does not know.
+/// </summary>
+public sealed record PicnicDetails(
+    string Id,
+    bool Organic,
+    double? SaltGramsPer100,
+    string? SaltText);
+
 /// <summary>How a shopping list item relates to Picnic.</summary>
 public enum LinkState
 {

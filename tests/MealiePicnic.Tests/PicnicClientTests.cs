@@ -323,4 +323,131 @@ public class PicnicClientTests
         await TestFactory.Picnic(handler, tokens: Tokens("tok"))
             .AddToCartAsync("s1005080", 1, default);
     }
+
+    // ---------------------------------------------------------------- issue #6
+
+    /// <summary>
+    /// Shaped like a real product-details page: the product's own blocks carry the
+    /// ids this parser looks for, the nutrition table lives in an accordion item,
+    /// and an "alternatives-container" holds a competing product that happens to be
+    /// organic and salt-free. That last block is the whole point of the fixture.
+    /// </summary>
+    private const string ProductPage = """
+        {
+          "layout": { "body": { "children": [
+            { "id": "product-details-page-root-main-container", "pml": { "component": {
+                "children": [
+                  { "textType": "HEADER1", "markdown": "Volle melk" },
+                  { "markdown": "Campina" },
+                  { "type": "STACK", "children": [
+                      { "type": "RICH_TEXT", "markdown": "1 liter" },
+                      { "type": "RICH_TEXT", "markdown": "#(#9AA0A6)EUR 1,19/l" }
+                  ] }
+                ] } } },
+            { "id": "product-page-highlights", "children": [
+                { "markdown": "**Van Nederlandse koeien**" },
+                { "markdown": "Bron van calcium" }
+            ] },
+            { "id": "description", "children": [
+                { "markdown": "Verse volle melk, gepasteuriseerd." }
+            ] },
+            { "id": "accordion-list", "items": [
+                { "header": { "markdown": "**Ingredienten**" },
+                  "body": { "markdown": "Volle melk" } },
+                { "header": { "markdown": "**Voedingswaarde**" },
+                  "body": { "children": [
+                      { "markdown": "Per 100 ml" },
+                      { "markdown": "Energie" }, { "markdown": "272 kJ" },
+                      { "markdown": "Zout" }, { "markdown": "0,11 g" }
+                  ] } }
+            ] },
+            { "id": "alternatives-container", "children": [
+                { "content": { "sellingUnit": {
+                    "id": "s2000001", "name": "Biologische volle melk",
+                    "display_price": 159, "unit_quantity": "1 liter", "image_id": "img9" } },
+                  "markdown": "Biologisch, zonder zout" }
+            ] }
+          ] } }
+        }
+        """;
+
+    [Fact]
+    public async Task Details_reads_the_salt_from_the_nutrition_accordion()
+    {
+        var handler = new StubHandler().OnJson("product-details-page-root", ProductPage);
+
+        var details = await TestFactory.Picnic(handler, tokens: Tokens("tok"))
+            .GetDetailsAsync("s1000001", default);
+
+        Assert.Equal(0.11, details.SaltGramsPer100!.Value, 3);
+        Assert.Equal("0,11 g", details.SaltText);
+    }
+
+    [Fact]
+    public async Task Details_ignores_the_organic_claim_of_a_suggested_alternative()
+    {
+        // The trap: this page recommends an organic alternative. Scanning the whole
+        // tree would brand the conventional product organic -- worse than showing
+        // nothing at all.
+        var handler = new StubHandler().OnJson("product-details-page-root", ProductPage);
+
+        var details = await TestFactory.Picnic(handler, tokens: Tokens("tok"))
+            .GetDetailsAsync("s1000001", default);
+
+        Assert.False(details.Organic);
+    }
+
+    [Fact]
+    public async Task Details_reads_an_organic_claim_from_the_products_own_blocks()
+    {
+        var page = ProductPage.Replace("Bron van calcium", "Biologisch, Skal-gecertificeerd");
+        var handler = new StubHandler().OnJson("product-details-page-root", page);
+
+        var details = await TestFactory.Picnic(handler, tokens: Tokens("tok"))
+            .GetDetailsAsync("s1000001", default);
+
+        Assert.True(details.Organic);
+    }
+
+    [Fact]
+    public async Task Details_requests_the_product_page_once_and_caches_it()
+    {
+        var handler = new StubHandler().OnJson("product-details-page-root", ProductPage);
+        var picnic = TestFactory.Picnic(handler, tokens: Tokens("tok"));
+
+        await picnic.GetDetailsAsync("s1000001", default);
+        await picnic.GetDetailsAsync("s1000001", default);
+
+        // One card scrolling in and out of view must not re-fetch a page that
+        // cannot change between deliveries.
+        Assert.Single(handler.Sent, x => x.Url.Contains("product-details-page-root"));
+        Assert.Contains("id=s1000001", handler.Sent[0].Url);
+    }
+
+    [Fact]
+    public async Task Details_degrade_to_empty_when_the_page_layout_is_unrecognised()
+    {
+        // Picnic renames a node id: both features go quiet, nothing throws, and the
+        // card still links.
+        var handler = new StubHandler().OnJson("product-details-page-root",
+            """{ "layout": { "body": { "children": [ { "id": "something-new" } ] } } }""");
+
+        var details = await TestFactory.Picnic(handler, tokens: Tokens("tok"))
+            .GetDetailsAsync("s1000001", default);
+
+        Assert.False(details.Organic);
+        Assert.Null(details.SaltGramsPer100);
+    }
+
+    [Theory]
+    [InlineData("s1000001/../../user")]
+    [InlineData("s1 000001")]
+    [InlineData("")]
+    public async Task Details_refuses_a_product_id_that_could_reshape_the_url(string id)
+    {
+        var handler = new StubHandler().OnJson("product-details-page-root", ProductPage);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => TestFactory
+            .Picnic(handler, tokens: Tokens("tok")).GetDetailsAsync(id, default));
+    }
 }
