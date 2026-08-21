@@ -239,4 +239,31 @@ public class PicnicClientTests
             return base.SendAsync(request, cancellationToken);
         }
     }
+
+    [Theory]
+    [InlineData("../../api/15/user")]
+    [InlineData("abc/def")]
+    [InlineData("")]
+    public async Task Rejects_bad_image_ids_before_any_request(string imageId)
+    {
+        // B3: route values arrive URL-decoded, so ..%2F..%2F would walk up the
+        // Picnic storefront path -- a limited SSRF. Nothing must leave the process.
+        var handler = new StubHandler();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => TestFactory
+            .Picnic(handler, tokens: Tokens("tok")).GetImageAsync(imageId, "medium", default));
+
+        Assert.Empty(handler.Sent);
+    }
+
+    [Fact]
+    public async Task Rejects_unknown_image_sizes()
+    {
+        var handler = new StubHandler();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => TestFactory
+            .Picnic(handler, tokens: Tokens("tok")).GetImageAsync("abc123", "../../etc", default));
+
+        Assert.Empty(handler.Sent);
+    }
 }

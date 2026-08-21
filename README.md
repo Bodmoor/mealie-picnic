@@ -1,5 +1,7 @@
 # Mealie → Picnic
 
+***DISCLAIMER: This project is largely vibecoded***
+
 Links Mealie shopping list items to Picnic products, and fills the Picnic basket in one click.
 
 The mapping lives on the Mealie **food** (not the recipe, not the list item), so it is
