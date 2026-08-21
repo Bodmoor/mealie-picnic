@@ -22,7 +22,9 @@ public static class Html
                  display:grid; place-items:center; height:100vh; margin:0 }
           form { background:#1d2024; border:1px solid #2a2d31; border-radius:12px;
                  padding:28px; width:290px }
-          h1 { font-size:17px; margin:0 0 18px }
+          h1 { font-size:17px; margin:0 }
+          .brand { display:flex; align-items:center; gap:11px; margin-bottom:18px }
+          .brand img { border-radius:8px }
           input { width:100%; padding:9px 11px; border-radius:7px; border:1px solid #3a3d41;
                   background:#15171a; color:#e8eaed; box-sizing:border-box; font-size:15px }
           button { width:100%; margin-top:12px; padding:9px; border:0; border-radius:7px;
@@ -31,7 +33,10 @@ public static class Html
           .err { color:#e59a9a; font-size:13px; margin:12px 0 0 }
         </style>
         <form method="post" action="/login">
-          <h1>Mealie &rarr; Picnic</h1>
+          <div class="brand">
+            <img src="/icons/192.png" width="40" height="40" alt="">
+            <h1>Mealie &rarr; Picnic</h1>
+          </div>
           <input type="password" name="password" placeholder="Wachtwoord" autofocus>
           <button type="submit">Inloggen</button>
           <!--ERROR-->
@@ -55,7 +60,13 @@ public static class Html
           * { box-sizing: border-box }
           body { font:15px/1.45 system-ui,sans-serif; margin:0; padding:20px 22px 60px;
                  background:#15171a; color:#e8eaed; max-width:1000px }
-          h1 { font-size:18px; margin:0 0 3px }
+          h1 { font-size:18px; margin:0 }
+          /* The whole lockup is the link home; keep it looking like a heading,
+             not like body-text link. */
+          .brand { display:flex; align-items:center; gap:10px; margin-bottom:3px;
+                   text-decoration:none; color:inherit; width:fit-content }
+          .brand:hover h1 { color:#7fb2e5 }
+          .brand img { border-radius:7px; flex:0 0 auto }
           h2 { font-size:15px; margin:26px 0 10px; color:#9aa0a6; font-weight:600 }
           a { color:#7fb2e5 }
           .bar { display:flex; gap:9px; flex-wrap:wrap; align-items:center; margin:16px 0 6px }
@@ -118,7 +129,10 @@ public static class Html
                          border:1px solid #3a3d41; background:#15171a; color:#e8eaed }
         </style>
 
-        <h1>Mealie &rarr; Picnic</h1>
+        <a class="brand" href="/" title="Terug naar de lijst">
+          <img src="/icons/192.png" width="34" height="34" alt="">
+          <h1>Mealie &rarr; Picnic</h1>
+        </a>
         <div class="muted">
           <span id="pstatus">Picnic: onbekend</span>
           &middot;
