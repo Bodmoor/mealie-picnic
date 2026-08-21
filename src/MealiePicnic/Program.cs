@@ -36,6 +36,21 @@ var app = builder.Build();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Turn a Picnic auth failure into a 401 the UI can react to, instead of a 500.
+// The browser then knows to open the login / 2FA dialog rather than showing a stack trace.
+app.Use(async (ctx, next) =>
+{
+    try
+    {
+        await next();
+    }
+    catch (PicnicAuthException ex)
+    {
+        ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await ctx.Response.WriteAsJsonAsync(new { error = "picnic_auth", message = ex.Message });
+    }
+});
+
 // Static files (the SPA) are behind auth too, hence no UseStaticFiles() before this.
 app.MapGet("/login", () => Results.Content(Html.LoginPage, "text/html"))
    .AllowAnonymous();
@@ -85,7 +100,7 @@ api.MapPost("/picnic/login", async (PicnicClient picnic, CancellationToken ct) =
 
 api.MapPost("/picnic/2fa/generate", async (TwoFactorChannel body, PicnicClient picnic, CancellationToken ct) =>
 {
-    await picnic.Generate2faAsync(string.IsNullOrWhiteSpace(body.Channel) ? "SMS" : body.Channel, ct);
+    await picnic.Generate2faAsync(string.IsNullOrWhiteSpace(body.Channel) ? "EMAIL" : body.Channel, ct);
     return Results.Ok(new { sent = true });
 });
 
