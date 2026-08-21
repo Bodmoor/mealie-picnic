@@ -1,0 +1,41 @@
+# Runs the published image from GHCR instead of building locally.
+#
+#   docker login ghcr.io -u <github-user>        # PAT with read:packages
+#   docker compose -f docker-compose.deploy.yml pull
+#   docker compose -f docker-compose.deploy.yml up -d
+#
+# The package inherits the repository's visibility, so while the repo is private
+# you must be logged in to pull. Use docker-compose.yml instead to build locally.
+services:
+  mealie-picnic:
+    image: ${IMAGE:-ghcr.io/bodmoor/mealie-picnic}:${TAG:-latest}
+    container_name: mealie-picnic
+    restart: unless-stopped
+    pull_policy: always      # `up -d` picks up a newly published :latest
+    ports:
+      # Loopback only: the app speaks plain HTTP. To expose it, put a TLS proxy in
+      # front and set COOKIE_SECURE=true and TRUST_PROXY=true.
+      - "127.0.0.1:8080:8080"
+    environment:
+      APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in .env}
+
+      MEALIE_URL: ${MEALIE_URL:?set MEALIE_URL in .env}
+      MEALIE_TOKEN: ${MEALIE_TOKEN:?set MEALIE_TOKEN in .env}
+      MEALIE_LIST: ${MEALIE_LIST:-Boodschappen}
+
+      # Optional: leave unset and the web UI asks at login instead.
+      PICNIC_USER: ${PICNIC_USER:-}
+      PICNIC_PASSWORD: ${PICNIC_PASSWORD:-}
+      PICNIC_COUNTRY: ${PICNIC_COUNTRY:-NL}
+
+      SEARCH_CACHE_MINUTES: ${SEARCH_CACHE_MINUTES:-30}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+    volumes:
+      # Named volume inherits the image's non-root /data ownership. A bind mount
+      # needs the host directory owned by UID 1654, or the token cannot be written
+      # and every restart demands 2FA again.
+      - picnic-data:/data
+
+volumes:
+  picnic-data:
