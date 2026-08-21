@@ -7,6 +7,7 @@ using MealiePicnic;
 using Microsoft.AspNetCore.Authentication;          // SignInAsync / SignOutAsync
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 
@@ -15,6 +16,15 @@ var builder = WebApplication.CreateBuilder(args);
 var options = AppOptions.FromConfiguration(builder.Configuration);
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<TokenStore>();
+
+// Keep the key ring on the mounted volume. The default location is inside the
+// container filesystem, so recreating the container (any image update) would
+// generate fresh keys and silently invalidate every session cookie -- everyone
+// gets logged out on deploy.
+builder.Services
+    .AddDataProtection()
+    .SetApplicationName("mealie-picnic")
+    .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(options.DataDir, "keys")));
 
 // Bounded: search terms and image ids are caller-chosen, so an unbounded cache is
 // an OOM waiting to happen. Entries set their Size (bytes for images, 1 for JSON).
@@ -233,15 +243,6 @@ api.MapGet("/list", async (string? listId, MealieClient mealie, CancellationToke
 
 api.MapGet("/search", async (string term, PicnicClient picnic, CancellationToken ct) =>
     Results.Ok(await picnic.SearchAsync(term, ct)));
-
-api.MapGet("/product/{id}", async (string id, PicnicClient picnic, CancellationToken ct) =>
-{
-    if (!Regex.IsMatch(id, "^[A-Za-z0-9_-]{1,32}$"))
-        return Results.BadRequest(new { error = "invalid_product_id" });
-
-    var page = await picnic.GetProductPageAsync(id, ct);
-    return Results.Ok(new { id, raw = page });
-});
 
 api.MapGet("/image/{imageId}", async (string imageId, PicnicClient picnic, CancellationToken ct) =>
 {

@@ -496,7 +496,7 @@ public static class Html
               const isLinked = p.id === it.picnicUid;
               return `
               <button class="card${isLinked ? ' linked' : ''}"
-                      onclick="openProduct(${index},'${esc(p.id)}')">
+                      onclick="link(${index},'${esc(p.id)}')">
                 ${p.imageId ? `<img src="/api/image/${esc(encodeURIComponent(p.imageId))}" loading="lazy" alt="">`
                             : '<div style="height:104px"></div>'}
                 ${isLinked ? '<div class="badge">&check; gekoppeld</div>' : ''}
@@ -524,41 +524,23 @@ public static class Html
 
         // ---------------------------------------------------------------- detail view
 
-        async function openProduct(index, productId) {
-          const it = items[index];
-          el.innerHTML = '<p class="muted">Details laden...</p>';
-          let detail = null;
-          try { detail = await jget('/api/product/' + encodeURIComponent(productId)); }
-          catch (e) { /* detail page is a nice-to-have; linking works regardless */ }
-
-          const isLinked = productId === it.picnicUid;
-
-          el.innerHTML = `
-            <div class="bar"><button onclick="openItem(${index})">&larr; terug</button>
-              <b>${esc(productId)}</b>
-              ${isLinked ? '<span class="badge">&check; gekoppeld</span>' : ''}</div>
-            <div class="row">
-              <div>
-                <p class="muted">Koppelen aan Mealie food <b>${esc(it.foodName)}</b></p>
-                <div class="bar">
-                  <button class="primary" onclick="link(${index},'${esc(productId)}')">
-                    ${isLinked ? 'Koppeling opnieuw opslaan' : 'Kies dit product'}</button>
-                  <button class="danger" onclick="exclude('${esc(it.foodId)}')">Niet bij Picnic</button>
-                </div>
-              </div>
-            </div>
-            <h2>Volledige API-respons</h2>
-            <pre>${esc(JSON.stringify(detail?.raw ?? {}, null, 2))}</pre>`;
-        }
-
+        // One click links and returns to the list. There is no confirmation step,
+        // so relinking is the undo: pick another product for the same food.
         async function link(index, productId) {
           const it = items[index];
           // Keep the product name alongside the id: a bare uid is undiagnosable later.
           const label = lastProducts.find(p => p.id === productId)?.name ?? '';
+
+          const hits = document.getElementById('hits');
+          if (hits) hits.innerHTML = `<p class="muted">Koppelen aan ${esc(label || productId)}...</p>`;
+
           try {
             await jpost('/api/link', {foodId: it.foodId, picnicUid: productId, label});
             await loadList();
-          } catch (e) { alert('Opslaan mislukt: ' + e.message); }
+          } catch (e) {
+            alert('Opslaan mislukt: ' + e.message);
+            await search(index);   // put the results back so another pick is possible
+          }
         }
 
         async function exclude(foodId) {
