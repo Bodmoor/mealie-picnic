@@ -8,7 +8,11 @@ public sealed record PicnicProduct(
     string UnitQuantity,
     string ImageId)
 {
-    public string PriceText => DisplayPrice is { } c ? $"€{c / 100m:0.00}" : "";
+    // Formatted invariantly on purpose: the display string must not depend on the
+    // host's culture (a nl-NL host would otherwise render "€2,69").
+    public string PriceText => DisplayPrice is { } c
+        ? string.Format(System.Globalization.CultureInfo.InvariantCulture, "€{0:0.00}", c / 100m)
+        : "";
 }
 
 /// <summary>How a shopping list item relates to Picnic.</summary>
