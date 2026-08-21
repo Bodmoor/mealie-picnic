@@ -72,6 +72,26 @@ All via environment variables.
 | `SEARCH_CACHE_MINUTES` | no       | `30`           | in-memory cache for searches and details  |
 | `DATA_DIR`             | no       | `/data`        | mounted volume for the token              |
 
+## Tests
+
+```bash
+dotnet test
+```
+
+xUnit, no mocking framework. Both APIs are faked with a `StubHandler` that routes on a
+URI substring and records every request, so the tests assert on the exact JSON bodies
+sent to Mealie — which is where the sharp edges are:
+
+* `MealieClientTests` — item classification by picnic extras, `New` sorted first,
+  free-text notes skipped, and the regression that matters: `SetFoodExtras` must echo
+  `aliases` back or a PUT destroys them.
+* `PicnicClientTests` — selling units collected from the layout tree in relevance order
+  and deduplicated, 403 mapped to `PicnicAuthException`, bad credentials returned as
+  HTTP 200 with an error body still treated as failure, and the refreshed
+  `x-picnic-auth` header captured after 2FA.
+* `AppOptionsTests` — defaults, required keys, and blank values falling through.
+* `TokenStoreTests` — the token survives a restart, so 2FA stays rare.
+
 ## How it works
 
 Mealie is a normal REST API. Picnic is not: there is no official API, and the current
