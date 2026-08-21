@@ -92,6 +92,13 @@ All via environment variables.
 | `COOKIE_SECURE`        | no       | `false`        | force Secure on the session cookie (needs TLS) |
 | `TRUST_PROXY`          | no       | `false`        | honour X-Forwarded-* from a reverse proxy |
 
+## Icons
+
+`assets/icon-192.png`, `assets/icon-512.png` and `assets/icon-maskable-512.png` are
+compiled into the assembly as embedded resources, so there is no `wwwroot` to deploy.
+Replace the files to change the icon; the maskable one needs its art inset by about
+20% or Android's circular crop clips it.
+
 ## Tests
 
 ```bash

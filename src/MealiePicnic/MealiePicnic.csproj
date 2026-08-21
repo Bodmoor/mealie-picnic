@@ -16,6 +16,18 @@
     <DockerfileContext>..\..</DockerfileContext>
   </PropertyGroup>
 
+  <!-- The PWA icons ship inside the assembly, so there is no wwwroot to deploy
+       and nothing to keep in sync next to the DLL. LogicalName must match the
+       names Icons.Load() looks up. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\assets\icon-192.png"
+                      LogicalName="MealiePicnic.assets.icon-192.png" />
+    <EmbeddedResource Include="..\..\assets\icon-512.png"
+                      LogicalName="MealiePicnic.assets.icon-512.png" />
+    <EmbeddedResource Include="..\..\assets\icon-maskable-512.png"
+                      LogicalName="MealiePicnic.assets.icon-maskable-512.png" />
+  </ItemGroup>
+
   <!-- Surface the root-level infra files in Solution Explorer so they are
        editable without leaving the IDE. Link keeps them out of subfolders. -->
   <ItemGroup>
