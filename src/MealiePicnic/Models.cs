@@ -41,4 +41,7 @@ public sealed record ShoppingItem(
     public int Amount => Quantity >= 1 ? (int)Math.Ceiling(Quantity) : 1;
 }
 
+/// <summary>A Mealie shopping list, for the picker.</summary>
+public sealed record ShoppingListSummary(string Id, string Name);
+
 public sealed record CartResult(string Name, string Uid, int Amount, bool Ok, string? Error);

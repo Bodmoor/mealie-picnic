@@ -82,9 +82,17 @@ public sealed class PicnicClient(
 
     // ------------------------------------------------------------------ auth
 
-    /// <summary>True when credentials have to come from the caller.</summary>
-    public bool NeedsCredentials =>
-        options.PicnicUser.Length == 0 || options.PicnicPassword.Length == 0;
+    /// <summary>Is a username available from configuration (user secrets / env)?</summary>
+    public bool HasConfiguredUser => options.PicnicUser.Length > 0;
+
+    /// <summary>Is a password available from configuration (user secrets / env)?</summary>
+    public bool HasConfiguredPassword => options.PicnicPassword.Length > 0;
+
+    /// <summary>The configured username, safe to show in the UI so it can be prefilled.</summary>
+    public string ConfiguredUser => options.PicnicUser;
+
+    /// <summary>True when neither configuration nor a cached token can get us in.</summary>
+    public bool NeedsCredentials => !HasConfiguredUser || !HasConfiguredPassword;
 
     /// <summary>
     /// Log in. Arguments win over the environment, so PICNIC_USER / PICNIC_PASSWORD
@@ -235,6 +243,31 @@ public sealed class PicnicClient(
 
     public Task<JsonNode?> GetCartAsync(CancellationToken ct) =>
         SendAsync(Build(HttpMethod.Get, "/cart"), ct);
+
+    // ------------------------------------------------------------------ logout
+
+    /// <summary>
+    /// Invalidate the session at Picnic and forget the cached token. The remote call
+    /// is best-effort: if it fails the local token is dropped regardless, otherwise a
+    /// broken token could never be cleared from the UI.
+    /// </summary>
+    public async Task LogoutAsync(CancellationToken ct)
+    {
+        if (HasToken)
+        {
+            try
+            {
+                await SendAsync(Build(HttpMethod.Post, "/user/logout"), ct);
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "Picnic logout call failed; clearing the local token anyway");
+            }
+        }
+
+        tokens.Clear();
+        log.LogInformation("Picnic token cleared");
+    }
 }
 
 public sealed class PicnicAuthException(string message) : Exception(message);

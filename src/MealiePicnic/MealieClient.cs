@@ -30,27 +30,42 @@ public sealed class MealieClient(HttpClient http, AppOptions options, ILogger<Me
         return JsonNode.Parse(body) ?? new JsonObject();
     }
 
-    /// <summary>Resolve the configured list name to its id.</summary>
-    public async Task<string> GetListIdAsync(CancellationToken ct)
+    /// <summary>All shopping lists, so the UI can offer a picker.</summary>
+    public async Task<List<ShoppingListSummary>> GetListsAsync(CancellationToken ct)
     {
         var json = await SendAsync(Request(HttpMethod.Get, "households/shopping/lists?perPage=-1"), ct);
-        var lists = json["items"]?.AsArray() ?? new JsonArray();
 
-        foreach (var list in lists)
-        {
-            var name = list?["name"]?.GetValue<string>() ?? "";
-            if (string.Equals(name.Trim(), options.MealieList.Trim(), StringComparison.OrdinalIgnoreCase))
-                return list!["id"]!.GetValue<string>();
-        }
-
-        var found = string.Join(", ", lists.Select(l => l?["name"]?.GetValue<string>()));
-        throw new InvalidOperationException($"No shopping list named '{options.MealieList}'. Found: {found}");
+        return [.. (json["items"]?.AsArray() ?? new JsonArray())
+            .Where(l => l?["id"] is not null)
+            .Select(l => new ShoppingListSummary(
+                l!["id"]!.GetValue<string>(),
+                l["name"]?.GetValue<string>() ?? "(naamloos)"))];
     }
 
-    /// <summary>Unchecked items on the list, classified by their picnic extras.</summary>
-    public async Task<List<ShoppingItem>> GetItemsAsync(CancellationToken ct)
+    /// <summary>Resolve the configured default list name to its id.</summary>
+    public async Task<string> GetListIdAsync(CancellationToken ct)
     {
-        var listId = await GetListIdAsync(ct);
+        var lists = await GetListsAsync(ct);
+
+        var match = lists.FirstOrDefault(l =>
+            string.Equals(l.Name.Trim(), options.MealieList.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (match is not null)
+            return match.Id;
+
+        throw new InvalidOperationException(
+            $"No shopping list named '{options.MealieList}'. Found: " +
+            string.Join(", ", lists.Select(l => l.Name)));
+    }
+
+    /// <summary>
+    /// Items on a list, classified by their picnic extras. Checked items are
+    /// included and flagged via <see cref="ShoppingItem.Checked"/>; the basket
+    /// skips them and the UI keeps them in a collapsed section.
+    /// Pass a listId to override the configured default (MEALIE_LIST).
+    /// </summary>
+    public async Task<List<ShoppingItem>> GetItemsAsync(string? listId, CancellationToken ct)
+    {
+        listId = string.IsNullOrWhiteSpace(listId) ? await GetListIdAsync(ct) : listId.Trim();
         var path = $"households/shopping/items?queryFilter=shoppingListId={listId}" +
                    "&orderBy=position&orderDirection=asc&perPage=-1";
 
@@ -64,6 +79,7 @@ public sealed class MealieClient(HttpClient http, AppOptions options, ILogger<Me
             var food = node["food"];
             // Free-text notes have no linked food, so there is nothing to map against.
             if (food is null) continue;
+
 
             var extras = food["extras"] as JsonObject;
             var uid = extras?[ExtraUid]?.GetValue<string>();

@@ -64,7 +64,7 @@ All via environment variables.
 | `APP_PASSWORD`         | yes      | —              | password for the web UI                   |
 | `MEALIE_URL`           | yes      | —              | e.g. `https://mealie.local`               |
 | `MEALIE_TOKEN`         | yes      | —              | Mealie → Profile → API Tokens; user secret locally |
-| `MEALIE_LIST`          | no       | `Boodschappen` | shopping list name                        |
+| `MEALIE_LIST`          | no       | `Boodschappen` | *default* list; the UI has a picker and remembers your choice |
 | `PICNIC_USER`          | no*      | —              | *needed until a token is cached           |
 | `PICNIC_PASSWORD`      | no*      | —              |                                           |
 | `PICNIC_COUNTRY`       | no       | `NL`           | `NL`, `DE`, `FR`                          |

@@ -59,7 +59,7 @@ public class MealieClientTests
                 ] }
                 """);
 
-        var items = await TestFactory.Mealie(handler).GetItemsAsync(default);
+        var items = await TestFactory.Mealie(handler).GetItemsAsync(null, default);
 
         Assert.Equal(LinkState.Linked, items.Single(i => i.FoodName == "melk").State);
         Assert.Equal(LinkState.Excluded, items.Single(i => i.FoodName == "zout").State);
@@ -79,7 +79,7 @@ public class MealieClientTests
                 ] }
                 """);
 
-        var items = await TestFactory.Mealie(handler).GetItemsAsync(default);
+        var items = await TestFactory.Mealie(handler).GetItemsAsync(null, default);
 
         Assert.Equal(new[] { "mmm-new", "aaa-linked", "zzz-excluded" }, items.Select(i => i.FoodName));
     }
@@ -95,7 +95,7 @@ public class MealieClientTests
                                "quantity": 0, "food": null } ] }
                 """);
 
-        var items = await TestFactory.Mealie(handler).GetItemsAsync(default);
+        var items = await TestFactory.Mealie(handler).GetItemsAsync(null, default);
 
         Assert.Empty(items);   // nothing to map a Picnic product against
     }
@@ -160,5 +160,48 @@ public class MealieClientTests
 
         Assert.Contains("401", ex.Message);
         Assert.Contains("Not authenticated", ex.Message);
+    }
+
+    [Fact]
+    public async Task GetLists_returns_every_list()
+    {
+        var handler = new StubHandler().OnJson("shopping/lists", Lists);
+
+        var lists = await TestFactory.Mealie(handler).GetListsAsync(default);
+
+        Assert.Equal(new[] { "Boodschappen", "Andere lijst" }, lists.Select(l => l.Name));
+        Assert.Equal("list-1", lists[0].Id);
+    }
+
+    [Fact]
+    public async Task Explicit_listId_skips_the_lists_lookup()
+    {
+        var handler = new StubHandler().OnJson("shopping/items", """{ "items": [] }""");
+
+        await TestFactory.Mealie(handler).GetItemsAsync("list-9", default);
+
+        // Only the items call: MEALIE_LIST never needs resolving.
+        var call = Assert.Single(handler.Sent);
+        Assert.Contains("shoppingListId=list-9", call.Url);
+    }
+
+    [Fact]
+    public async Task Keeps_checked_items_but_flags_them()
+    {
+        // The basket skips them; the UI shows them in a collapsed 'done' section.
+        var handler = new StubHandler()
+            .OnJson("shopping/lists", Lists)
+            .OnJson("shopping/items", $$"""
+                { "items": [
+                    {{Item("i1", "f1", "melk", """{ "picnic_uid": "s1" }""", @checked: true)}},
+                    {{Item("i2", "f2", "wrap", """{ "picnic_uid": "s2" }""")}}
+                ] }
+                """);
+
+        var items = await TestFactory.Mealie(handler).GetItemsAsync(null, default);
+
+        Assert.Equal(2, items.Count);
+        Assert.True(items.Single(i => i.FoodName == "melk").Checked);
+        Assert.False(items.Single(i => i.FoodName == "wrap").Checked);
     }
 }
