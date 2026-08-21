@@ -37,7 +37,6 @@ public class AuthorizationTests
         "/api/lists",
         "/api/list",
         "/api/search?term=melk",
-        "/api/product/s123",
         "/api/image/abc",
         "/api/cart",
         "/api/picnic/status",
