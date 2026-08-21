@@ -157,6 +157,12 @@ POST /cart/add_product    {product_id, count}
   `picnic_pack` is known and smaller than needed — 2 kg against 1 kg bags is two. Any
   line is capped at `Quantities.MaxPerItem` so a mis-parsed unit costs one basket slot
   rather than fifty.
+* A line is only ticked off in Mealie after the product is *verified* present in the
+  Picnic cart. Picnic answers some refusals with HTTP 200 and an error body, so a 2xx
+  is not evidence of success — taking it as such used to tick the item off with nothing
+  in the basket. If the add fails the line stays on the list; if the add succeeds but
+  Mealie will not tick it off, that is reported separately rather than as a failure,
+  because retrying would order it twice.
 * Auth is a single shared password behind a rate-limited login. The compose file
   publishes on loopback only; for ANY exposure beyond that, a TLS-terminating
   reverse proxy is required, with `COOKIE_SECURE=true` and `TRUST_PROXY=true` set —

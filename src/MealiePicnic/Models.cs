@@ -66,4 +66,15 @@ public sealed record ShoppingItem(
 /// <summary>A Mealie shopping list, for the picker.</summary>
 public sealed record ShoppingListSummary(string Id, string Name);
 
-public sealed record CartResult(string Name, string Uid, int Amount, bool Ok, string? Error);
+/// <summary>
+/// Outcome for one line. Ok covers the Picnic side only: CheckedOff is separate so
+/// "in the basket but Mealie did not tick it" is not reported as a failed add,
+/// which would invite a retry and a double order.
+/// </summary>
+public sealed record CartResult(
+    string Name,
+    string Uid,
+    int Amount,
+    bool Ok,
+    string? Error,
+    bool CheckedOff = false);

@@ -266,4 +266,61 @@ public class PicnicClientTests
 
         Assert.Empty(handler.Sent);
     }
+
+    // ---------------------------------------------------------------- issue #7
+
+    private const string CartWith = """
+        { "items": [ { "items": [ { "id": "s1005080", "name": "Wraps" } ] } ],
+          "total_count": 1 }
+        """;
+
+    private const string EmptyCart = """
+        { "items": [], "total_count": 0 }
+        """;
+
+    [Fact]
+    public async Task Add_succeeds_when_the_product_is_in_the_returned_cart()
+    {
+        var handler = new StubHandler().OnJson("cart/add_product", CartWith);
+
+        await TestFactory.Picnic(handler, tokens: Tokens("tok"))
+            .AddToCartAsync("s1005080", 1, default);
+
+        var body = JsonNode.Parse(handler.Sent.Single().Body)!;
+        Assert.Equal("s1005080", body["product_id"]!.GetValue<string>());
+        Assert.Equal(1, body["count"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task Add_throws_when_picnic_returns_an_error_body_under_200()
+    {
+        // The trap behind issue #7: HTTP 200, but nothing was added. Treating this
+        // as success ticked the Mealie item off and lost the line.
+        var handler = new StubHandler().OnJson("cart/add_product",
+            """{ "error": { "code": "MAX_COUNT_EXCEEDED", "message": "nope" } }""");
+
+        var ex = await Assert.ThrowsAsync<PicnicCartException>(() => TestFactory
+            .Picnic(handler, tokens: Tokens("tok")).AddToCartAsync("s1005080", 500, default));
+
+        Assert.Contains("MAX_COUNT_EXCEEDED", ex.Message);
+    }
+
+    [Fact]
+    public async Task Add_throws_when_the_product_is_absent_from_the_returned_cart()
+    {
+        var handler = new StubHandler().OnJson("cart/add_product", EmptyCart);
+
+        await Assert.ThrowsAsync<PicnicCartException>(() => TestFactory
+            .Picnic(handler, tokens: Tokens("tok")).AddToCartAsync("s1005080", 1, default));
+    }
+
+    [Fact]
+    public async Task Add_accepts_an_empty_response_body()
+    {
+        // Some endpoints answer 204. Absence of a cart is not evidence of failure.
+        var handler = new StubHandler().OnStatus("cart/add_product", HttpStatusCode.NoContent);
+
+        await TestFactory.Picnic(handler, tokens: Tokens("tok"))
+            .AddToCartAsync("s1005080", 1, default);
+    }
 }

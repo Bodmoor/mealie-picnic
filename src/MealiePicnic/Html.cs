@@ -592,8 +592,12 @@ public static class Html
             const r = await jpost('/api/basket', {checkOff, listId: currentList});
             log.innerHTML = (r.results.length
                 ? r.results.map(x => x.ok
-                    ? `<div class="ok">&check; ${esc(x.name)} x${x.amount}</div>`
-                    : `<div class="bad">&times; ${esc(x.name)}: ${esc(x.error)}</div>`).join('')
+                    ? `<div class="ok">&check; ${esc(x.name)} x${x.amount}${
+                         checkOff && !x.checkedOff
+                           ? ' <span class="muted">(in de kar, niet afgevinkt)</span>'
+                           : ''}</div>`
+                    : `<div class="bad">&times; ${esc(x.name)}: ${esc(x.error)}
+                         <span class="muted">&mdash; blijft op de lijst</span></div>`).join('')
                 : '<div class="muted">Niets toegevoegd: geen gekoppelde items op deze lijst.</div>')
               + (r.aborted ? '<div class="bad">Gestopt na herhaalde fouten; rest niet geprobeerd.</div>' : '')
               + (r.unmapped ? `<div class="muted">${r.unmapped} nog niet gekoppeld</div>` : '');
