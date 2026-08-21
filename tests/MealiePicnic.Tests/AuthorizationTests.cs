@@ -56,27 +56,45 @@ public class AuthorizationTests
         "/api/picnic/2fa/verify",
     };
 
+    /// <summary>
+    /// A denial is either a 302 to the login page (browser navigation) or a bare
+    /// 401 -- the cookie handler picks per request. Both satisfy the requirement;
+    /// asserting one specific mechanism made the test brittle rather than stricter.
+    /// What must never happen is the endpoint running, so this also checks no
+    /// session cookie is issued and no app content comes back.
+    /// </summary>
+    private static async Task AssertDeniedAsync(HttpResponseMessage response)
+    {
+        Assert.True(
+            response.StatusCode is System.Net.HttpStatusCode.Unauthorized
+                or System.Net.HttpStatusCode.Redirect,
+            $"expected 401 or 302, got {(int)response.StatusCode}");
+
+        if (response.StatusCode is System.Net.HttpStatusCode.Redirect)
+            Assert.Contains("/login", response.Headers.Location!.ToString());
+
+        Assert.False(response.Headers.Contains("Set-Cookie"));
+
+        // The SPA shell must not leak to an anonymous caller.
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("Haal Mealie lijst op", body);
+    }
+
     [Theory]
     [MemberData(nameof(ProtectedGets))]
-    public async Task Unauthenticated_GET_is_redirected_to_login(string path)
+    public async Task Unauthenticated_GET_is_denied(string path)
     {
         using var factory = NewFactory();
-        var response = await NewClient(factory).GetAsync(path);
-
-        Assert.Equal(System.Net.HttpStatusCode.Redirect, response.StatusCode);
-        Assert.Contains("/login", response.Headers.Location!.ToString());
+        await AssertDeniedAsync(await NewClient(factory).GetAsync(path));
     }
 
     [Theory]
     [MemberData(nameof(ProtectedPosts))]
-    public async Task Unauthenticated_POST_is_redirected_to_login(string path)
+    public async Task Unauthenticated_POST_is_denied(string path)
     {
         using var factory = NewFactory();
-        var response = await NewClient(factory)
-            .PostAsync(path, new StringContent("{}", System.Text.Encoding.UTF8, "application/json"));
-
-        Assert.Equal(System.Net.HttpStatusCode.Redirect, response.StatusCode);
-        Assert.Contains("/login", response.Headers.Location!.ToString());
+        await AssertDeniedAsync(await NewClient(factory)
+            .PostAsync(path, new StringContent("{}", System.Text.Encoding.UTF8, "application/json")));
     }
 
     [Fact]

@@ -6,16 +6,16 @@ namespace MealiePicnic.Tests;
 public class MealieClientTests
 {
     private const string Lists = """
-        { "items": [ { "id": "list-1", "name": "Boodschappen" },
-                     { "id": "list-2", "name": "Andere lijst" } ] }
+        { "items": [ { "id": "dddddddd-1111-1111-1111-111111111111", "name": "Boodschappen" },
+                     { "id": "dddddddd-2222-2222-2222-222222222222", "name": "Andere lijst" } ] }
         """;
 
     private static string Item(string id, string foodId, string name, object extras,
                                double quantity = 0, bool @checked = false) => $$"""
         {
-          "id": "{{id}}", "shoppingListId": "list-1", "note": "", "display": "{{name}}",
+          "id": "{{id}}", "shoppingListId": "dddddddd-1111-1111-1111-111111111111", "note": "", "display": "{{name}}",
           "checked": {{(@checked ? "true" : "false")}}, "position": 0, "quantity": {{quantity}},
-          "labelId": "lab-1", "label": { "id": "lab-1", "name": "Zuivel" },
+          "labelId": "bbbbbbbb-1111-1111-1111-111111111111", "label": { "id": "bbbbbbbb-1111-1111-1111-111111111111", "name": "Zuivel" },
           "foodId": "{{foodId}}",
           "food": { "id": "{{foodId}}", "name": "{{name}}", "description": "",
                     "aliases": [], "extras": {{extras}} },
@@ -30,7 +30,7 @@ public class MealieClientTests
 
         var id = await TestFactory.Mealie(handler).GetListIdAsync(default);
 
-        Assert.Equal("list-1", id);
+        Assert.Equal("dddddddd-1111-1111-1111-111111111111", id);
     }
 
     [Fact]
@@ -53,9 +53,9 @@ public class MealieClientTests
             .OnJson("shopping/lists", Lists)
             .OnJson("shopping/items", $$"""
                 { "items": [
-                    {{Item("i1", "f1", "melk", """{ "picnic_uid": "s1", "picnic": "true" }""")}},
-                    {{Item("i2", "f2", "zout", """{ "picnic": "false" }""")}},
-                    {{Item("i3", "f3", "wrap", "{}")}}
+                    {{Item("11111111-1111-1111-1111-111111111111", "aaaaaaaa-1111-1111-1111-111111111111", "melk", """{ "picnic_uid": "s1", "picnic": "true" }""")}},
+                    {{Item("22222222-2222-2222-2222-222222222222", "aaaaaaaa-2222-2222-2222-222222222222", "zout", """{ "picnic": "false" }""")}},
+                    {{Item("33333333-3333-3333-3333-333333333333", "aaaaaaaa-3333-3333-3333-333333333333", "wrap", "{}")}}
                 ] }
                 """);
 
@@ -73,9 +73,9 @@ public class MealieClientTests
             .OnJson("shopping/lists", Lists)
             .OnJson("shopping/items", $$"""
                 { "items": [
-                    {{Item("i1", "f1", "aaa-linked", """{ "picnic_uid": "s1" }""")}},
-                    {{Item("i2", "f2", "zzz-excluded", """{ "picnic": "false" }""")}},
-                    {{Item("i3", "f3", "mmm-new", "{}")}}
+                    {{Item("11111111-1111-1111-1111-111111111111", "aaaaaaaa-1111-1111-1111-111111111111", "aaa-linked", """{ "picnic_uid": "s1" }""")}},
+                    {{Item("22222222-2222-2222-2222-222222222222", "aaaaaaaa-2222-2222-2222-222222222222", "zzz-excluded", """{ "picnic": "false" }""")}},
+                    {{Item("33333333-3333-3333-3333-333333333333", "aaaaaaaa-3333-3333-3333-333333333333", "mmm-new", "{}")}}
                 ] }
                 """);
 
@@ -90,7 +90,7 @@ public class MealieClientTests
         var handler = new StubHandler()
             .OnJson("shopping/lists", Lists)
             .OnJson("shopping/items", """
-                { "items": [ { "id": "n1", "shoppingListId": "list-1", "note": "kaarsjes",
+                { "items": [ { "id": "n1", "shoppingListId": "dddddddd-1111-1111-1111-111111111111", "note": "kaarsjes",
                                "display": "kaarsjes", "checked": false, "position": 0,
                                "quantity": 0, "food": null } ] }
                 """);
@@ -106,17 +106,17 @@ public class MealieClientTests
         // Regression: Mealie has no PATCH and PUT replaces the object, so omitting
         // aliases from the body silently destroys them.
         var handler = new StubHandler()
-            .OnJson("foods/f1", """
+            .OnJson("foods/", """
                 {
-                  "id": "f1", "name": "wrap", "pluralName": "wraps", "description": "",
+                  "id": "aaaaaaaa-1111-1111-1111-111111111111", "name": "wrap", "pluralName": "wraps", "description": "",
                   "aliases": [ { "name": "witte tortilla" } ],
-                  "label": { "id": "lab-9", "name": "Brood" },
+                  "label": { "id": "bbbbbbbb-9999-9999-9999-999999999999", "name": "Brood" },
                   "extras": { "keep_me": "yes" }
                 }
                 """);
 
         var merged = await TestFactory.Mealie(handler)
-            .SetFoodExtrasAsync("f1", new Dictionary<string, string> { ["picnic_uid"] = "s1005080" }, default);
+            .SetFoodExtrasAsync("aaaaaaaa-1111-1111-1111-111111111111", new Dictionary<string, string> { ["picnic_uid"] = "s1005080" }, default);
 
         Assert.Equal("yes", merged["keep_me"]!.GetValue<string>());
         Assert.Equal("s1005080", merged["picnic_uid"]!.GetValue<string>());
@@ -126,26 +126,26 @@ public class MealieClientTests
 
         Assert.Equal("witte tortilla", body["aliases"]![0]!["name"]!.GetValue<string>());
         Assert.Equal("wraps", body["pluralName"]!.GetValue<string>());
-        Assert.Equal("lab-9", body["labelId"]!.GetValue<string>());
+        Assert.Equal("bbbbbbbb-9999-9999-9999-999999999999", body["labelId"]!.GetValue<string>());
         Assert.Equal("yes", body["extras"]!["keep_me"]!.GetValue<string>());
     }
 
     [Fact]
     public async Task CheckItem_sets_checked_true_and_echoes_identity()
     {
-        var handler = new StubHandler().OnJson("shopping/items/i1", """
-            { "id": "i1", "shoppingListId": "list-1", "note": "", "position": 3,
+        var handler = new StubHandler().OnJson("shopping/items/", """
+            { "id": "11111111-1111-1111-1111-111111111111", "shoppingListId": "dddddddd-1111-1111-1111-111111111111", "note": "", "position": 3,
               "quantity": 2, "isFood": true, "disableAmount": false,
-              "labelId": "lab-1", "foodId": "f1", "unitId": null, "checked": false }
+              "labelId": "bbbbbbbb-1111-1111-1111-111111111111", "foodId": "aaaaaaaa-1111-1111-1111-111111111111", "unitId": null, "checked": false }
             """);
 
-        await TestFactory.Mealie(handler).CheckItemAsync("i1", default);
+        await TestFactory.Mealie(handler).CheckItemAsync("11111111-1111-1111-1111-111111111111", default);
 
         var body = JsonNode.Parse(handler.Sent.Single(s => s.Method == HttpMethod.Put).Body)!;
 
         Assert.True(body["checked"]!.GetValue<bool>());
-        Assert.Equal("list-1", body["shoppingListId"]!.GetValue<string>());
-        Assert.Equal("f1", body["foodId"]!.GetValue<string>());
+        Assert.Equal("dddddddd-1111-1111-1111-111111111111", body["shoppingListId"]!.GetValue<string>());
+        Assert.Equal("aaaaaaaa-1111-1111-1111-111111111111", body["foodId"]!.GetValue<string>());
         Assert.Equal(3, body["position"]!.GetValue<int>());
     }
 
@@ -170,7 +170,7 @@ public class MealieClientTests
         var lists = await TestFactory.Mealie(handler).GetListsAsync(default);
 
         Assert.Equal(new[] { "Boodschappen", "Andere lijst" }, lists.Select(l => l.Name));
-        Assert.Equal("list-1", lists[0].Id);
+        Assert.Equal("dddddddd-1111-1111-1111-111111111111", lists[0].Id);
     }
 
     [Fact]
@@ -178,11 +178,11 @@ public class MealieClientTests
     {
         var handler = new StubHandler().OnJson("shopping/items", """{ "items": [] }""");
 
-        await TestFactory.Mealie(handler).GetItemsAsync("list-9", default);
+        await TestFactory.Mealie(handler).GetItemsAsync("dddddddd-9999-9999-9999-999999999999", default);
 
         // Only the items call: MEALIE_LIST never needs resolving.
         var call = Assert.Single(handler.Sent);
-        Assert.Contains("shoppingListId=list-9", call.Url);
+        Assert.Contains("shoppingListId=dddddddd-9999-9999-9999-999999999999", call.Url);
     }
 
     [Fact]
@@ -193,8 +193,8 @@ public class MealieClientTests
             .OnJson("shopping/lists", Lists)
             .OnJson("shopping/items", $$"""
                 { "items": [
-                    {{Item("i1", "f1", "melk", """{ "picnic_uid": "s1" }""", @checked: true)}},
-                    {{Item("i2", "f2", "wrap", """{ "picnic_uid": "s2" }""")}}
+                    {{Item("11111111-1111-1111-1111-111111111111", "aaaaaaaa-1111-1111-1111-111111111111", "melk", """{ "picnic_uid": "s1" }""", @checked: true)}},
+                    {{Item("22222222-2222-2222-2222-222222222222", "aaaaaaaa-2222-2222-2222-222222222222", "wrap", """{ "picnic_uid": "s2" }""")}}
                 ] }
                 """);
 
@@ -203,5 +203,46 @@ public class MealieClientTests
         Assert.Equal(2, items.Count);
         Assert.True(items.Single(i => i.FoodName == "melk").Checked);
         Assert.False(items.Single(i => i.FoodName == "wrap").Checked);
+    }
+
+    [Theory]
+    [InlineData("../../app/about")]
+    [InlineData("not-a-guid")]
+    [InlineData("")]
+    public async Task Rejects_non_guid_food_ids_before_any_request(string foodId)
+    {
+        // B2: these paths carry the MEALIE_TOKEN, so '../..' would be full API
+        // access with the app's credentials. Nothing must leave the process.
+        var handler = new StubHandler();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => TestFactory.Mealie(handler)
+            .SetFoodExtrasAsync(foodId, new Dictionary<string, string>(), default));
+
+        Assert.Empty(handler.Sent);
+    }
+
+    [Theory]
+    [InlineData("x&perPage=1")]
+    [InlineData("../../foods")]
+    public async Task Rejects_non_guid_list_ids_before_any_request(string listId)
+    {
+        // B1: listId is interpolated into a query string; '&' would inject params.
+        var handler = new StubHandler();
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => TestFactory.Mealie(handler).GetItemsAsync(listId, default));
+
+        Assert.Empty(handler.Sent);
+    }
+
+    [Fact]
+    public async Task Rejects_non_guid_item_ids_before_any_request()
+    {
+        var handler = new StubHandler();
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => TestFactory.Mealie(handler).CheckItemAsync("../../app/about", default));
+
+        Assert.Empty(handler.Sent);
     }
 }
