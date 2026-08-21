@@ -28,8 +28,10 @@ public sealed class PicnicClient(
     IMemoryCache cache,
     ILogger<PicnicClient> log)
 {
-    private const string DeviceId = "3C417201548B2E3B";
     private const string Agent = "30100;1.236.1-15553;";
+
+    // x-picnic-did comes from the TokenStore: random per install, persisted, and
+    // stable across restarts because Picnic binds 2FA verification to it.
 
     public bool HasToken => tokens.Token is { Length: > 0 };
 
@@ -42,7 +44,7 @@ public sealed class PicnicClient(
         request.Headers.TryAddWithoutValidation("Accept-Language",
             options.PicnicCountry.ToUpperInvariant() switch { "DE" => "de", "FR" => "fr", _ => "nl" });
         request.Headers.TryAddWithoutValidation("x-picnic-agent", Agent);
-        request.Headers.TryAddWithoutValidation("x-picnic-did", DeviceId);
+        request.Headers.TryAddWithoutValidation("x-picnic-did", tokens.DeviceId);
 
         if (tokens.Token is { Length: > 0 } token)
             request.Headers.TryAddWithoutValidation("x-picnic-auth", token);
@@ -149,8 +151,16 @@ public sealed class PicnicClient(
             await SendAsync(Build(HttpMethod.Get, "/user"), ct);
             return true;
         }
-        catch (PicnicAuthException)
+        catch (OperationCanceledException)
         {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // "Is the token usable" is false on ANY failure -- an unreachable
+            // Picnic must degrade the status line, not 500 the status endpoint.
+            if (ex is not PicnicAuthException)
+                log.LogWarning(ex, "Picnic status probe failed");
             return false;
         }
     }
@@ -171,7 +181,11 @@ public sealed class PicnicClient(
         if (json is not null)
             Collect(json, products, seen);
 
-        cache.Set(key, products, TimeSpan.FromMinutes(options.SearchCacheMinutes));
+        cache.Set(key, products, new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(options.SearchCacheMinutes),
+            Size = 64 * 1024,          // nominal: a parsed result list is small
+        });
         log.LogInformation("Search '{Term}' -> {Count} products", term, products.Count);
         return products;
     }
@@ -219,7 +233,11 @@ public sealed class PicnicClient(
         var json = await SendAsync(Build(HttpMethod.Get, path), ct);
 
         if (json is not null)
-            cache.Set(key, json, TimeSpan.FromMinutes(options.SearchCacheMinutes));
+            cache.Set(key, json, new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(options.SearchCacheMinutes),
+                Size = 512 * 1024,     // nominal: product page trees are large JSON
+            });
         return json;
     }
 
@@ -229,9 +247,20 @@ public sealed class PicnicClient(
         if (cache.TryGetValue(key, out byte[]? hit) && hit is not null)
             return hit;
 
+        // Defense in depth: the endpoint validates too, but this client must never
+        // build a path from something that can contain '/' or '..'.
+        if (!System.Text.RegularExpressions.Regex.IsMatch(imageId, "^[A-Za-z0-9_-]{1,128}$"))
+            throw new ArgumentException("Invalid image id.", nameof(imageId));
+        if (size is not ("small" or "medium" or "large"))
+            throw new ArgumentException("Invalid image size.", nameof(size));
+
         var url = $"{options.PicnicImageBaseUrl}/{imageId}/{size}.png";
         var bytes = await http.GetByteArrayAsync(url, ct);
-        cache.Set(key, bytes, TimeSpan.FromHours(24));
+        cache.Set(key, bytes, new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(4),
+            Size = bytes.Length,       // real bytes: images dominate the cache
+        });
         return bytes;
     }
 

@@ -3,7 +3,7 @@ namespace MealiePicnic;
 /// <summary>
 /// The whole UI, served as two strings. No build step, no npm, no framework.
 /// </summary>
-internal static class Html
+public static class Html
 {
     public const string LoginPage = """
         <!doctype html>
@@ -56,6 +56,8 @@ internal static class Html
           button.primary:hover { background:#4a8fd4 }
           button.danger:hover { border-color:#c86a6a; color:#e59a9a }
           .muted { color:#9aa0a6; font-size:13px }
+          .linklike { border:0; background:none; padding:0; color:#7fb2e5;
+                      text-decoration:underline; cursor:pointer; font-size:inherit }
           .item { display:flex; align-items:center; gap:12px; padding:10px 12px;
                   border:1px solid #2a2d31; border-radius:9px; margin-bottom:7px;
                   background:#1a1d21; cursor:pointer }
@@ -107,7 +109,10 @@ internal static class Html
         <h1>Mealie &rarr; Picnic</h1>
         <div class="muted">
           <span id="pstatus">Picnic: onbekend</span>
-          &middot; <a href="/logout">afmelden bij deze app</a>
+          &middot;
+          <form method="post" action="/logout" style="display:inline">
+            <button type="submit" class="linklike">afmelden bij deze app</button>
+          </form>
         </div>
 
         <div id="view"></div>
@@ -156,8 +161,14 @@ internal static class Html
         }
 
         const el = document.getElementById('view');
-        const esc = s => String(s ?? '').replace(/[&<>"]/g,
-          c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+        // RULE: every ${...} interpolation in this file is either a number we
+        // produced ourselves (${index}, ${done.length}) or wrapped in esc().
+        // Ids from Mealie/Picnic look safe today, but that is their invariant,
+        // not ours. The single quote matters most: values are placed inside
+        // single-quoted JS strings in onclick attributes.
+        const esc = s => String(s ?? '').replace(/[&<>"'`\/]/g,
+          c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',
+                 "'":'&#39;','`':'&#96;','/':'&#47;'}[c]));
 
         // A 401 with error 'picnic_auth' means the Picnic token is missing or
         // not 2FA-verified. Callers turn that into the login dialog.
@@ -404,7 +415,7 @@ internal static class Html
           el.innerHTML = `
             <div class="bar">
               <select onchange="pickList(this.value)" title="Mealie lijst">
-                ${lists.map(l => `<option value="${l.id}"
+                ${lists.map(l => `<option value="${esc(l.id)}"
                   ${l.id === currentList ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}
               </select>
               <button class="primary" onclick="loadList()">Haal Mealie lijst op</button>
@@ -425,7 +436,7 @@ internal static class Html
               excluded.map(i => `<div class="item">
                   <div><div class="name">${esc(i.foodName)}</div>
                        <div class="sub">uitgesloten</div></div>
-                  <button class="tag" onclick="include('${i.foodId}')">terugzetten</button>
+                  <button class="tag" onclick="include('${esc(i.foodId)}')">terugzetten</button>
                 </div>`).join('') : ''}
 
             ${done.length ? `
@@ -465,7 +476,7 @@ internal static class Html
                       style="padding:7px 10px;border-radius:7px;border:1px solid #3a3d41;
                              background:#15171a;color:#e8eaed">
                <button onclick="search(${index})">Zoek</button>
-               <button class="danger" onclick="exclude('${it.foodId}')">Niet bij Picnic</button>
+               <button class="danger" onclick="exclude('${esc(it.foodId)}')">Niet bij Picnic</button>
              </div>
              <div id="hits"><p class="muted">Zoeken...</p></div>`;
           search(index);
@@ -485,8 +496,8 @@ internal static class Html
               const isLinked = p.id === it.picnicUid;
               return `
               <button class="card${isLinked ? ' linked' : ''}"
-                      onclick="openProduct(${index},'${p.id}')">
-                ${p.imageId ? `<img src="/api/image/${p.imageId}" loading="lazy" alt="">`
+                      onclick="openProduct(${index},'${esc(p.id)}')">
+                ${p.imageId ? `<img src="/api/image/${esc(encodeURIComponent(p.imageId))}" loading="lazy" alt="">`
                             : '<div style="height:104px"></div>'}
                 ${isLinked ? '<div class="badge">&check; gekoppeld</div>' : ''}
                 <div class="n">${esc(p.name)}</div>
@@ -530,9 +541,9 @@ internal static class Html
               <div>
                 <p class="muted">Koppelen aan Mealie food <b>${esc(it.foodName)}</b></p>
                 <div class="bar">
-                  <button class="primary" onclick="link(${index},'${productId}')">
+                  <button class="primary" onclick="link(${index},'${esc(productId)}')">
                     ${isLinked ? 'Koppeling opnieuw opslaan' : 'Kies dit product'}</button>
-                  <button class="danger" onclick="exclude('${it.foodId}')">Niet bij Picnic</button>
+                  <button class="danger" onclick="exclude('${esc(it.foodId)}')">Niet bij Picnic</button>
                 </div>
               </div>
             </div>
@@ -570,6 +581,7 @@ internal static class Html
                     ? `<div class="ok">&check; ${esc(x.name)} x${x.amount}</div>`
                     : `<div class="bad">&times; ${esc(x.name)}: ${esc(x.error)}</div>`).join('')
                 : '<div class="muted">Niets toegevoegd: geen gekoppelde items op deze lijst.</div>')
+              + (r.aborted ? '<div class="bad">Gestopt na herhaalde fouten; rest niet geprobeerd.</div>' : '')
               + (r.unmapped ? `<div class="muted">${r.unmapped} nog niet gekoppeld</div>` : '');
             if (checkOff) await loadList();
           } catch (e) { log.innerHTML = '<div class="bad">' + esc(e.message) + '</div>'; }

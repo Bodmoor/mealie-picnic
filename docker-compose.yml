@@ -5,7 +5,10 @@ services:
     container_name: mealie-picnic
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      # Loopback only by default: the app speaks plain HTTP and the session
+      # cookie would otherwise cross the LAN in cleartext. To expose it, put a
+      # TLS proxy in front and set COOKIE_SECURE=true, TRUST_PROXY=true.
+      - "127.0.0.1:8080:8080"
     environment:
       # --- web UI login (required) ---
       APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in .env}
@@ -21,6 +24,8 @@ services:
       PICNIC_COUNTRY: ${PICNIC_COUNTRY:-NL}
 
       SEARCH_CACHE_MINUTES: ${SEARCH_CACHE_MINUTES:-30}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
     volumes:
       # Named volume, so it inherits the non-root ownership baked into the image.
       # A bind mount (./data:/data) also works, but the host directory must be

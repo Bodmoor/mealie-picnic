@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build (warnings are errors)
+        run: dotnet build --no-restore -warnaserror
+
+      - name: Test
+        run: dotnet test --no-build --logger "console;verbosity=normal"
+
+      - name: Vulnerable packages (advisory)
+        # Non-blocking for now: surfaces known-vulnerable (transitive) packages
+        # in the log without failing the build. Tighten once the baseline is clean.
+        run: dotnet list package --vulnerable --include-transitive || true
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t mealie-picnic:ci .
+
+      - name: Assert no secrets in the build context
+        # F1 regression guard: a local dev token under src/**/data must never
+        # reach a layer. The build stage would have copied it with src/.
+        run: |
+          docker build --target build -t mealie-picnic:build-stage .
+          docker run --rm --entrypoint sh mealie-picnic:build-stage \
+            -c 'found=$(find /src -name "picnic-token" -o -name "*.env" -o -name "secrets.json" | head -5); \
+                if [ -n "$found" ]; then echo "SECRETS IN BUILD CONTEXT:"; echo "$found"; exit 1; fi; \
+                echo "build context clean"'

@@ -14,6 +14,17 @@ public sealed class MealieClient(HttpClient http, AppOptions options, ILogger<Me
     public const string ExtraFlag = "picnic";
     public const string ExtraLabel = "picnic_label";
 
+    /// <summary>
+    /// All Mealie ids interpolated into paths or query strings are UUIDs. Enforcing
+    /// that here (not only at the endpoints) means a '../..' or '&perPage=1' can
+    /// never reach the URL, however this client ends up being called -- the request
+    /// carries the MEALIE_TOKEN, so path traversal would be full API access.
+    /// </summary>
+    private static string RequireGuid(string value, string name) =>
+        Guid.TryParse(value, out var parsed)
+            ? parsed.ToString("D")
+            : throw new ArgumentException($"{name} is not a valid Mealie id.", name);
+
     private HttpRequestMessage Request(HttpMethod method, string path)
     {
         var request = new HttpRequestMessage(method, $"{options.MealieUrl}/api/{path}");
@@ -65,7 +76,9 @@ public sealed class MealieClient(HttpClient http, AppOptions options, ILogger<Me
     /// </summary>
     public async Task<List<ShoppingItem>> GetItemsAsync(string? listId, CancellationToken ct)
     {
-        listId = string.IsNullOrWhiteSpace(listId) ? await GetListIdAsync(ct) : listId.Trim();
+        listId = string.IsNullOrWhiteSpace(listId)
+            ? await GetListIdAsync(ct)
+            : RequireGuid(listId, nameof(listId));
         var path = $"households/shopping/items?queryFilter=shoppingListId={listId}" +
                    "&orderBy=position&orderDirection=asc&perPage=-1";
 
@@ -120,6 +133,7 @@ public sealed class MealieClient(HttpClient http, AppOptions options, ILogger<Me
     public async Task<JsonObject> SetFoodExtrasAsync(
         string foodId, IReadOnlyDictionary<string, string> values, CancellationToken ct)
     {
+        foodId = RequireGuid(foodId, nameof(foodId));
         var food = await SendAsync(Request(HttpMethod.Get, $"foods/{foodId}"), ct);
 
         var extras = food["extras"] as JsonObject ?? new JsonObject();
@@ -151,6 +165,7 @@ public sealed class MealieClient(HttpClient http, AppOptions options, ILogger<Me
     /// <summary>Tick an item off the Mealie list. Same read-modify-write caveat as foods.</summary>
     public async Task CheckItemAsync(string itemId, CancellationToken ct)
     {
+        itemId = RequireGuid(itemId, nameof(itemId));
         var item = await SendAsync(Request(HttpMethod.Get, $"households/shopping/items/{itemId}"), ct);
 
         var body = new JsonObject
