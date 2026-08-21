@@ -2,6 +2,11 @@
 **/obj
 **/.vs
 **/.vscode
+**/*.user
+tests
 data
 .env
 .git
+.gitignore
+README.md
+docker-compose.yml
