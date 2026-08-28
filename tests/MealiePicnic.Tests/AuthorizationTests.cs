@@ -50,6 +50,7 @@ public class AuthorizationTests
         "/api/image/abc",
         "/api/cart",
         "/api/picnic/status",
+        "/api/me",
     };
 
     public static TheoryData<string> ProtectedPosts => new()
@@ -162,6 +163,30 @@ public class AuthorizationTests
         var home = await client.SendAsync(request);
 
         Assert.Equal(System.Net.HttpStatusCode.OK, home.StatusCode);
+    }
+
+    [Fact]
+    public async Task Me_has_no_label_for_the_local_password_identity()
+    {
+        // Issue #22: the label is what /api/me hands app.js to show next to
+        // "afmelden bij deze app". The single-password fallback identity (see
+        // HandlePasswordLoginAsync) is a shared "owner" account with no email
+        // claim, not a personal one -- nothing to label it with.
+        using var factory = NewFactory();
+        var client = NewClient(factory);
+
+        var login = await client.PostAsync("/login",
+            new FormUrlEncodedContent([new("password", Password)]));
+        var cookie = login.Headers.GetValues("Set-Cookie")
+            .Single(c => c.StartsWith("mealiepicnic=")).Split(';')[0];
+
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/me");
+        request.Headers.Add("Cookie", cookie);
+        var response = await client.SendAsync(request);
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var json = System.Text.Json.JsonDocument.Parse(body);
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, json.RootElement.GetProperty("label").ValueKind);
     }
 
     [Fact]

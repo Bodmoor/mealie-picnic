@@ -106,14 +106,14 @@ public static class Html
           <img src="/icons/192.png" width="34" height="34" alt="">
           <h1>Mealie &rarr; Picnic</h1>
         </a>
-        <div class="muted" x-data x-init="$store.picnic.refresh()" x-cloak>
+        <div class="muted" x-data x-init="$store.picnic.refresh(); $store.me.refresh()" x-cloak>
           <span x-show="$store.picnic.authenticated">Picnic: <b class="ok">ingelogd</b>
             <a href="#" x-on:click.prevent="$store.picnic.logout()">uitloggen</a></span>
           <span x-show="!$store.picnic.authenticated">Picnic: <b class="bad">niet ingelogd</b>
             <a href="#" x-on:click.prevent="$store.picnic.promptLogin()">inloggen</a></span>
           &middot;
           <form method="post" action="/logout" style="display:inline">
-            <button type="submit" class="linklike">afmelden bij deze app</button>
+            <button type="submit" class="linklike">afmelden<span x-show="$store.me.label"> (<span x-text="$store.me.label"></span>)</span> bij deze app</button>
           </form>
         </div>
 

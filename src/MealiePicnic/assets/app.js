@@ -7,6 +7,23 @@
 // deferred, so they still run in document order, but this is the documented-safe
 // pattern regardless of that.
 document.addEventListener('alpine:init', () => {
+  // Issue #22: labels the "afmelden bij deze app" button with the signed-in
+  // account, so it reads "afmelden (paul@example.com)" instead of just
+  // "afmelden" -- easy to lose track of who's signed in on a shared household
+  // browser. null (the local/password fallback identity has no email) means
+  // the button stays unlabelled.
+  Alpine.store('me', {
+    label: null,
+    async refresh() {
+      try {
+        const r = await fetch('/api/me');
+        this.label = (await r.json()).label;
+      } catch {
+        this.label = null;
+      }
+    },
+  });
+
   Alpine.store('picnic', {
     authenticated: false, hasConfiguredUser: false, hasConfiguredPassword: false, configuredUser: '',
 

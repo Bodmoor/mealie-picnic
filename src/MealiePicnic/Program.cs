@@ -379,6 +379,21 @@ app.MapPost("/logout", async (HttpContext ctx) =>
 
 app.MapGet("/", () => Results.Content(Html.AppPage, "text/html"));
 
+// Issue #22: the "afmelden bij deze app" button says only that, with no way to
+// tell which account is signed in -- easy to lose track of in a shared
+// household browser. Html.AppPage is a compile-time constant (served identically
+// to everyone), so this rides along as a fetch from app.js instead of being
+// rendered server-side, the same as Picnic's own auth status.
+app.MapGet("/api/me", (ClaimsPrincipal user) =>
+{
+    // Only an OIDC identity has an email claim at all -- the local/password
+    // fallback identity (see HandlePasswordLoginAsync) is a single shared
+    // "owner" account, not a personal one, so there is nothing worth labelling.
+    var email = user.FindFirstValue("email") ?? user.FindFirstValue(ClaimTypes.Email);
+    var label = email is null ? null : (user.FindFirstValue("name") ?? user.FindFirstValue(ClaimTypes.Name) ?? email);
+    return Results.Ok(new { label });
+});
+
 // The signed-in identity resolved to no Mealie household at login (see the
 // OIDC OnTicketReceived handler above) -- e.g. the email is not linked to a
 // household in Mealie yet. Not a permission problem (403), a data/config one:
