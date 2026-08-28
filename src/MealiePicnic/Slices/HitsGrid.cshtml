@@ -1,4 +1,5 @@
 @inherits RazorSlice<HitsModel>
+@using System.Text.Json
 @{
     var it = Model.Item;
     var products = Model.Products;
@@ -18,13 +19,20 @@ else
         @foreach (var p in products)
         {
             var isLinked = p.Id == it.PicnicUid;
-            @* data-* attributes, read back via hx-vals="js:...": label/pack are free-text product
-               names from Picnic, and hand-building a JSON string by interpolating them into an
-               hx-vals attribute would break (or worse, mis-parse) on a name containing a quote. *@
+            // JSON-encoded server-side (not hx-vals="js:...") so label/pack -- free-text
+            // product names from Picnic that can contain quotes -- are never hand-built
+            // into a JSON string, and so linking works under the strict CSP (no
+            // 'unsafe-eval', see Vendor.cs) that "js:" hx-vals silently fails under.
+            var linkVals = JsonSerializer.Serialize(new
+            {
+                foodId = it.FoodId,
+                picnicUid = p.Id,
+                label = p.Name,
+                pack = p.UnitQuantity,
+            });
             <button class="card @(isLinked ? "linked" : "")"
-                    data-food-id="@it.FoodId" data-picnic-uid="@p.Id" data-label="@p.Name" data-pack="@p.UnitQuantity"
                     hx-post="@($"/api/link?listId={Uri.EscapeDataString(Model.ListId)}")"
-                    hx-vals="js:{foodId: event.target.closest('.card').dataset.foodId, picnicUid: event.target.closest('.card').dataset.picnicUid, label: event.target.closest('.card').dataset.label, pack: event.target.closest('.card').dataset.pack}"
+                    hx-vals="@linkVals"
                     hx-target="#view" hx-swap="outerHTML">
                 @if (!string.IsNullOrEmpty(p.ImageId))
                 {
