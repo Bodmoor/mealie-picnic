@@ -147,6 +147,29 @@ public class HouseholdLinkStoreTests : IDisposable
         Assert.Empty(Directory.GetFiles(Path.Combine(_dir, "households", "household-a"), "*.tmp"));
     }
 
+    [Fact]
+    public void Selected_list_starts_unset()
+    {
+        Assert.Null(New().SelectedListId("household-a"));
+    }
+
+    [Fact]
+    public void Selected_list_persists_across_instances()
+    {
+        New().SelectList("household-a", "dddddddd-1111-1111-1111-111111111111");
+
+        Assert.Equal("dddddddd-1111-1111-1111-111111111111", New().SelectedListId("household-a"));
+    }
+
+    [Fact]
+    public void Selected_list_is_isolated_per_household()
+    {
+        var store = New();
+        store.SelectList("household-a", "dddddddd-1111-1111-1111-111111111111");
+
+        Assert.Null(store.SelectedListId("household-b"));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);

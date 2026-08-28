@@ -92,15 +92,15 @@ All via environment variables.
 | `BOODSCHAPPEN_OIDC_CLIENT_SECRET` | no*      | —              | *required once `BOODSCHAPPEN_OIDC_AUTHORITY` is set; confidential client |
 | `MEALIE_URL`           | yes      | —              | e.g. `https://mealie.local`               |
 | `MEALIE_TOKEN`         | yes      | —              | Mealie → Profile → API Tokens; **must be a superuser/admin account** once `BOODSCHAPPEN_OIDC_AUTHORITY` is set — it also calls `/api/admin/users` to resolve a signed-in email to a household; user secret locally |
-| `MEALIE_LIST`          | no       | `Boodschappen` | *default* list; the UI has a picker and remembers your choice |
+| `MEALIE_LIST`          | no       | `Boodschappen` | *default* list; the UI has a picker and remembers your household's choice server-side |
 | `PICNIC_USER`          | no*      | —              | *needed until a token is cached           |
 | `PICNIC_PASSWORD`      | no*      | —              |                                           |
 | `PICNIC_COUNTRY`       | no       | `NL`           | `NL`, `DE`, `FR`                          |
 | `PICNIC_API_VERSION`   | no       | `15`           | bump if Picnic starts returning 400s      |
 | `SEARCH_CACHE_MINUTES` | no       | `30`           | in-memory cache for searches; product pages are held 12 h |
 | `DATA_DIR`             | no       | `/data`        | volume for the token and device id        |
-| `COOKIE_SECURE`        | no       | `false`        | force Secure on the session cookie (needs TLS) |
-| `TRUST_PROXY`          | no       | `false`        | honour X-Forwarded-* from a reverse proxy |
+| `COOKIE_SECURE`        | no       | `true`         | Secure flag on the session cookie (needs TLS); set `false` for plain-HTTP loopback-only local dev |
+| `TRUST_PROXY`          | no       | `true`         | honour X-Forwarded-* from a reverse proxy; set `false` only when nothing is actually in front |
 
 ## Icons
 
@@ -199,10 +199,14 @@ POST /cart/add_product    {product_id, count}
   no additional group/claim check of its own, and does not manage accounts. Every
   signed-in identity gets its own cached Picnic token under `DATA_DIR/users/{key}/`
   once OIDC is enabled; without OIDC the token stays in the original single, shared
-  location. Either way, the compose file publishes on loopback only; for ANY exposure
-  beyond that, a TLS-terminating reverse proxy is required, with `COOKIE_SECURE=true`
-  and `TRUST_PROXY=true` set — otherwise the session cookie and any password travel
-  the network in cleartext.
+  location. Either way, the compose file publishes on loopback only; `COOKIE_SECURE`
+  and `TRUST_PROXY` both default to `true` (HTTPS enforced), so exposing this beyond
+  loopback needs a TLS-terminating reverse proxy in front that forwards
+  `X-Forwarded-Proto` — without `TRUST_PROXY`, the app cannot tell it's actually
+  behind TLS and builds absolute URLs (e.g. the OIDC `redirect_uri`) as `http://`,
+  which most identity providers then reject as a mismatch. Set both to `false`
+  explicitly only when there truly is no proxy at all (e.g. plain-HTTP loopback-only
+  local dev, which `docker-compose.yml` already does).
 * Household resolution (issue #17) happens once, at sign-in, and is cached as a claim
   on the session cookie — not looked up again until the next login. If the signed-in
   email is not linked to any Mealie household, sign-in still succeeds, but every

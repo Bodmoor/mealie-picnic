@@ -16,11 +16,49 @@ public sealed class HouseholdLinkStore
     private readonly string _dataDir;
     private readonly object _lock = new();
     private readonly Dictionary<string, Dictionary<string, FoodLink>> _cache = new();
+    private readonly Dictionary<string, string?> _selectedListCache = new();
 
     public HouseholdLinkStore(AppOptions options)
     {
         _dataDir = options.DataDir;
         Directory.CreateDirectory(_dataDir);
+    }
+
+    /// <summary>
+    /// Which Mealie shopping list this household last picked -- remembered
+    /// server-side, per household, rather than in browser localStorage (which
+    /// leaked across identities sharing a browser/device, or an admin's own
+    /// selection bleeding into an impersonated session).
+    /// </summary>
+    public string? SelectedListId(string householdKey)
+    {
+        lock (_lock) return GetSelectedListId(householdKey);
+    }
+
+    public void SelectList(string householdKey, string listId)
+    {
+        lock (_lock)
+        {
+            if (GetSelectedListId(householdKey) == listId)
+                return;
+
+            var dir = Path.Combine(_dataDir, "households", householdKey);
+            Directory.CreateDirectory(dir);
+            WriteAtomic(Path.Combine(dir, "list-id"), listId);
+            _selectedListCache[householdKey] = listId;
+        }
+    }
+
+    private string? GetSelectedListId(string householdKey)
+    {
+        if (_selectedListCache.TryGetValue(householdKey, out var cached))
+            return cached;
+
+        var path = Path.Combine(_dataDir, "households", householdKey, "list-id");
+        var raw = File.Exists(path) ? File.ReadAllText(path).Trim() : "";
+        var value = raw.Length == 0 ? null : raw;
+        _selectedListCache[householdKey] = value;
+        return value;
     }
 
     /// <summary>
@@ -104,19 +142,25 @@ public sealed class HouseholdLinkStore
     {
         var dir = Path.Combine(_dataDir, "households", householdKey);
         Directory.CreateDirectory(dir);
-        var path = Path.Combine(dir, "links.json");
-        var tmp = path + ".tmp";
-
-        using (var stream = new FileStream(tmp, FileMode.Create, FileAccess.Write))
-        {
-            JsonSerializer.Serialize(stream, links);
-            stream.Flush(flushToDisk: true);
-        }
-        File.Move(tmp, path, overwrite: true);
+        WriteAtomic(Path.Combine(dir, "links.json"), JsonSerializer.Serialize(links));
     }
 
     private string FilePath(string householdKey) =>
         Path.Combine(_dataDir, "households", householdKey, "links.json");
+
+    /// <summary>Write via temp file + rename, so a crash mid-write can never leave
+    /// a truncated file at the final path. Same pattern as TokenStore.</summary>
+    private static void WriteAtomic(string path, string content)
+    {
+        var tmp = path + ".tmp";
+        using (var stream = new FileStream(tmp, FileMode.Create, FileAccess.Write))
+        {
+            var bytes = System.Text.Encoding.UTF8.GetBytes(content);
+            stream.Write(bytes, 0, bytes.Length);
+            stream.Flush(flushToDisk: true);
+        }
+        File.Move(tmp, path, overwrite: true);
+    }
 }
 
 /// <summary>One household's Picnic link for a single Mealie food.</summary>

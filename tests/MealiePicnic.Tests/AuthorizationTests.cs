@@ -57,6 +57,7 @@ public class AuthorizationTests
         "/api/exclude",
         "/api/include",
         "/api/basket",
+        "/api/lists/select",
         "/api/picnic/login",
         "/api/picnic/logout",
         "/api/picnic/2fa/generate",

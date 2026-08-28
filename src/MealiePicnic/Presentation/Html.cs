@@ -221,7 +221,7 @@ public static class Html
 
         <script>
         let items = [], showExcluded = false;
-        let lists = [], currentList = localStorage.getItem('listId') || '';
+        let lists = [], currentList = '';
         // Last search results, so link() can record the product name it saw.
         let lastProducts = [];
 
@@ -435,8 +435,10 @@ public static class Html
           try {
             const r = await jget('/api/lists');
             lists = r.lists;
-            // Fall back to the configured default when nothing is remembered, or
-            // when the remembered list has since been deleted in Mealie.
+            // Fall back to the configured default when nothing is remembered
+            // server-side for this household, or when the remembered list has
+            // since been deleted in Mealie.
+            if (!currentList) currentList = r.selectedListId || '';
             if (!currentList || !lists.some(l => l.id === currentList)) {
               const fallback = lists.find(l =>
                 l.name.trim().toLowerCase() === r.defaultName.trim().toLowerCase());
@@ -445,9 +447,9 @@ public static class Html
           } catch { lists = []; }
         }
 
-        function pickList(id) {
+        async function pickList(id) {
           currentList = id;
-          localStorage.setItem('listId', id);
+          try { await jpost('/api/lists/select', {listId: id}); } catch { /* remembered next time instead */ }
           loadList();
         }
 
