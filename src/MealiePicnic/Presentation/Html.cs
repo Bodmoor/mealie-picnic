@@ -110,6 +110,11 @@ public static class Html
           dialog input { width:100%; padding:8px 10px; margin-top:8px; border-radius:6px;
                          border:1px solid #3a3d41; background:#15171a; color:#e8eaed }
           [x-cloak] { display:none }
+          /* Issue #23: six numeric cells read as "enter a 6-digit code" at a
+             glance, which one generic text field does not. */
+          .otp { display:flex; gap:8px; margin-top:8px }
+          .otp input { width:38px; height:44px; padding:0; margin:0; text-align:center;
+                       font-size:20px }
         </style>
 
         <a class="brand" href="/" title="Terug naar de lijst">
@@ -151,7 +156,21 @@ public static class Html
             <button data-channel="EMAIL" data-label="E-mail"
                     x-on:click="$store.picnic.send2fa('EMAIL')">E-mail</button>
           </div>
-          <input id="otp" placeholder="Code" inputmode="numeric">
+          <div class="otp" x-data>
+            <input class="otpcell" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code"
+                   x-on:input="$store.picnic.handleOtpInput($event)" x-on:keydown="$store.picnic.handleOtpBackspace($event)">
+            <input class="otpcell" inputmode="numeric" pattern="[0-9]*"
+                   x-on:input="$store.picnic.handleOtpInput($event)" x-on:keydown="$store.picnic.handleOtpBackspace($event)">
+            <input class="otpcell" inputmode="numeric" pattern="[0-9]*"
+                   x-on:input="$store.picnic.handleOtpInput($event)" x-on:keydown="$store.picnic.handleOtpBackspace($event)">
+            <input class="otpcell" inputmode="numeric" pattern="[0-9]*"
+                   x-on:input="$store.picnic.handleOtpInput($event)" x-on:keydown="$store.picnic.handleOtpBackspace($event)">
+            <input class="otpcell" inputmode="numeric" pattern="[0-9]*"
+                   x-on:input="$store.picnic.handleOtpInput($event)" x-on:keydown="$store.picnic.handleOtpBackspace($event)">
+            <input class="otpcell" inputmode="numeric" pattern="[0-9]*"
+                   x-on:input="$store.picnic.handleOtpInput($event)" x-on:keydown="$store.picnic.handleOtpBackspace($event)">
+          </div>
+          <input type="hidden" id="otp">
           <div class="bar" x-data>
             <button class="primary" x-on:click="$store.picnic.verify2fa()">Verifieren</button>
             <button x-on:click="$store.picnic.closeTwofa()">Sluiten</button>

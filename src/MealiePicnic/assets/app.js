@@ -122,6 +122,40 @@ document.addEventListener('alpine:init', () => {
       return [...document.querySelectorAll('#twofa button[data-channel]')];
     },
 
+    // Issue #23: six single-digit cells read as "enter a 6-digit code" at a
+    // glance, unlike one generic text field. They only drive the DOM (styling
+    // and per-cell focus); #otp -- read by verify2fa() -- is the actual value,
+    // kept in sync here so the rest of the 2FA flow does not need to change.
+    otpCells() {
+      return [...document.querySelectorAll('.otpcell')];
+    },
+    syncOtp() {
+      document.getElementById('otp').value = this.otpCells().map(c => c.value).join('');
+    },
+    // Handles both an ordinary keystroke (one digit, current cell) and a
+    // multi-digit paste or SMS autofill landing in one cell -- there is no
+    // maxlength on the cells for exactly that reason, since it would otherwise
+    // truncate a paste to one character before this ever sees it.
+    handleOtpInput(event) {
+      const digits = event.target.value.replace(/\D/g, '');
+      const cells = this.otpCells();
+      const start = cells.indexOf(event.target);
+      [...digits].forEach((d, i) => { if (cells[start + i]) cells[start + i].value = d; });
+      const next = cells[start + digits.length];
+      if (next) next.focus(); else event.target.blur();
+      this.syncOtp();
+    },
+    handleOtpBackspace(event) {
+      if (event.key !== 'Backspace' || event.target.value) return;
+      const cells = this.otpCells();
+      const previous = cells[cells.indexOf(event.target) - 1];
+      if (previous) { previous.focus(); previous.value = ''; this.syncOtp(); }
+    },
+    clearOtp() {
+      this.otpCells().forEach(c => c.value = '');
+      document.getElementById('otp').value = '';
+    },
+
     // Both channel buttons lock while a code is in flight and for a while after,
     // so an impatient double-click cannot burn codes.
     cooldownTimer: null,
@@ -156,7 +190,7 @@ document.addEventListener('alpine:init', () => {
         if (!r.ok) throw new Error(await r.text());
         document.getElementById('twofaMsg').textContent =
           `Code verstuurd via ${channel === 'EMAIL' ? 'e-mail' : channel}.`;
-        document.getElementById('otp').focus();
+        this.otpCells()[0]?.focus();
         this.startCooldown(30);
       } catch (e) {
         document.getElementById('twofaMsg').textContent = 'Kon geen code sturen: ' + e.message;
@@ -172,7 +206,7 @@ document.addEventListener('alpine:init', () => {
         });
         if (!r.ok) throw new Error(await r.text());
         this.resetCooldown();
-        document.getElementById('otp').value = '';
+        this.clearOtp();
         document.getElementById('twofa').close();
         await this.refresh();
         await this.runPending();
@@ -181,6 +215,7 @@ document.addEventListener('alpine:init', () => {
 
     closeTwofa() {
       this.resetCooldown();
+      this.clearOtp();
       document.getElementById('twofa').close();
     },
     closeCreds() {
