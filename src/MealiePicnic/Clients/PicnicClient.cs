@@ -20,6 +20,7 @@ namespace MealiePicnic.Clients;
 ///                                 "sellingUnit" objects, already in relevance order
 ///   GET  /pages/product-details-page-root?id=     full detail page for one product
 ///   POST /cart/add_product        body {product_id, count}
+///   POST /cart/products/add       body {product_id: count, ...}  -- batch add
 ///
 /// x-picnic-did must stay identical across calls: 2FA verification is bound to it.
 /// </summary>
@@ -452,6 +453,25 @@ public sealed class PicnicClient(
             throw new PicnicCartException(
                 $"Picnic accepted the request but {productId} is not in the cart.");
     }
+
+    /// <summary>
+    /// Add multiple products to the cart in a single request (issue #27). The
+    /// caller used to add a whole basket by calling <see cref="AddToCartAsync"/>
+    /// once per linked item, paced 250 ms apart to be gentle on an undocumented
+    /// API -- dozens of round trips for a full shopping list. Picnic's own app
+    /// uses this same batch endpoint (e.g. re-ordering a previous order), so one
+    /// request for the whole basket is the intended shape, not a workaround.
+    ///
+    /// Unlike <see cref="AddToCartAsync"/> this does not throw when a product was
+    /// refused: a partial failure (some products added, others not) must not
+    /// fail the ones that worked, so the caller checks the returned cart itself
+    /// with <see cref="CartHasProduct"/>, product by product.
+    /// </summary>
+    public Task<JsonNode?> AddProductsToCartAsync(IReadOnlyDictionary<string, int> quantities, CancellationToken ct) =>
+        SendAsync(Build(HttpMethod.Post, "/cart/products/add", quantities), ct);
+
+    /// <summary>Is this product verifiably present in a cart returned by the API?</summary>
+    public static bool CartHasProduct(JsonNode cart, string productId) => ContainsProduct(cart, productId);
 
     /// <summary>Depth-first search for a selling unit id anywhere in the cart tree.</summary>
     private static bool ContainsProduct(JsonNode node, string productId)
