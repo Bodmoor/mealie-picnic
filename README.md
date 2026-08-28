@@ -86,12 +86,12 @@ All via environment variables.
 
 | Variable               | Required | Default        | Notes                                     |
 | ---------------------- | -------- | -------------- | ----------------------------------------- |
-| `APP_PASSWORD`         | yes*     | —              | *not required once `OIDC_AUTHORITY` is set; still works there as a break-glass fallback at `/login/admin` (unlinked from the UI) |
-| `OIDC_AUTHORITY`       | no       | —              | Authentik issuer URL; setting this turns OIDC login on |
-| `OIDC_CLIENT_ID`       | no*      | —              | *required once `OIDC_AUTHORITY` is set     |
-| `OIDC_CLIENT_SECRET`   | no*      | —              | *required once `OIDC_AUTHORITY` is set; confidential client |
+| `APP_PASSWORD`         | yes*     | —              | *not required once `BOODSCHAPPEN_OIDC_AUTHORITY` is set; still works there as a break-glass fallback at `/login/admin` (unlinked from the UI) |
+| `BOODSCHAPPEN_OIDC_AUTHORITY`     | no       | —              | this app's OWN Authentik application issuer URL (not Mealie's); setting this turns OIDC login on |
+| `BOODSCHAPPEN_OIDC_CLIENT_ID`     | no*      | —              | *required once `BOODSCHAPPEN_OIDC_AUTHORITY` is set |
+| `BOODSCHAPPEN_OIDC_CLIENT_SECRET` | no*      | —              | *required once `BOODSCHAPPEN_OIDC_AUTHORITY` is set; confidential client |
 | `MEALIE_URL`           | yes      | —              | e.g. `https://mealie.local`               |
-| `MEALIE_TOKEN`         | yes      | —              | Mealie → Profile → API Tokens; **must be a superuser/admin account** once `OIDC_AUTHORITY` is set — it also calls `/api/admin/users` to resolve a signed-in email to a household; user secret locally |
+| `MEALIE_TOKEN`         | yes      | —              | Mealie → Profile → API Tokens; **must be a superuser/admin account** once `BOODSCHAPPEN_OIDC_AUTHORITY` is set — it also calls `/api/admin/users` to resolve a signed-in email to a household; user secret locally |
 | `MEALIE_LIST`          | no       | `Boodschappen` | *default* list; the UI has a picker and remembers your choice |
 | `PICNIC_USER`          | no*      | —              | *needed until a token is cached           |
 | `PICNIC_PASSWORD`      | no*      | —              |                                           |
@@ -190,8 +190,9 @@ POST /cart/add_product    {product_id, count}
   in the basket. If the add fails the line stays on the list; if the add succeeds but
   Mealie will not tick it off, that is reported separately rather than as a failure,
   because retrying would order it twice.
-* Auth is a single shared password behind a rate-limited login, unless `OIDC_AUTHORITY`
-  is set, in which case OIDC (e.g. Authentik) is the primary login and `APP_PASSWORD`
+* Auth is a single shared password behind a rate-limited login, unless
+  `BOODSCHAPPEN_OIDC_AUTHORITY` is set, in which case OIDC (e.g. Authentik, via this
+  app's own dedicated application) is the primary login and `APP_PASSWORD`
   becomes an optional break-glass fallback at `/login/admin` (deliberately not linked
   from anywhere in the UI). Who may sign in via OIDC is controlled entirely by the
   application/provider's own group policy bindings in Authentik — this app performs
@@ -207,7 +208,7 @@ POST /cart/add_product    {product_id, count}
   email is not linked to any Mealie household, sign-in still succeeds, but every
   mapping endpoint (`/api/list`, `/api/link`, `/api/exclude`, `/api/include`,
   `/api/basket`) answers `422` naming the email, until an admin links it in Mealie.
-  Without `OIDC_AUTHORITY` set, there is no email to resolve at all, so every session
+  Without `BOODSCHAPPEN_OIDC_AUTHORITY` set, there is no email to resolve at all, so every session
   (including the `/login/admin` break-glass one) shares one fixed pseudo-household
   (`local`) — the same single-household behaviour as before this feature existed.
   There is no migration from the old food-extras links: existing links must be

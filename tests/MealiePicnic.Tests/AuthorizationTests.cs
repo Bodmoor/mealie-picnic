@@ -27,9 +27,9 @@ public class AuthorizationTests
             // Development regardless of the settings above, so a developer who
             // has OIDC_* set locally (for manual testing) would otherwise flip
             // these OIDC-disabled tests over to OIDC-enabled behaviour.
-            builder.UseSetting("OIDC_AUTHORITY", "");
-            builder.UseSetting("OIDC_CLIENT_ID", "");
-            builder.UseSetting("OIDC_CLIENT_SECRET", "");
+            builder.UseSetting("BOODSCHAPPEN_OIDC_AUTHORITY", "");
+            builder.UseSetting("BOODSCHAPPEN_OIDC_CLIENT_ID", "");
+            builder.UseSetting("BOODSCHAPPEN_OIDC_CLIENT_SECRET", "");
         });
 
     private static HttpClient NewClient(WebApplicationFactory<Program> factory) =>

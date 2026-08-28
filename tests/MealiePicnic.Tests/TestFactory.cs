@@ -19,9 +19,9 @@ internal static class TestFactory
                 ["MEALIE_LIST"] = "Boodschappen",
                 ["APP_PASSWORD"] = "pw",
                 ["DATA_DIR"] = dataDir ?? Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")),
-                ["OIDC_AUTHORITY"] = oidcEnabled ? "https://authentik.test/application/o/mealie/" : null,
-                ["OIDC_CLIENT_ID"] = oidcEnabled ? "test-client" : null,
-                ["OIDC_CLIENT_SECRET"] = oidcEnabled ? "test-secret" : null,
+                ["BOODSCHAPPEN_OIDC_AUTHORITY"] = oidcEnabled ? "https://authentik.test/application/o/boodschappen/" : null,
+                ["BOODSCHAPPEN_OIDC_CLIENT_ID"] = oidcEnabled ? "test-client" : null,
+                ["BOODSCHAPPEN_OIDC_CLIENT_SECRET"] = oidcEnabled ? "test-secret" : null,
             })
             .Build());
 

@@ -19,6 +19,11 @@ services:
     environment:
       APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in .env}
 
+      # OIDC login (optional): this app's own dedicated Authentik application.
+      BOODSCHAPPEN_OIDC_AUTHORITY: ${BOODSCHAPPEN_OIDC_AUTHORITY:-}
+      BOODSCHAPPEN_OIDC_CLIENT_ID: ${BOODSCHAPPEN_OIDC_CLIENT_ID:-}
+      BOODSCHAPPEN_OIDC_CLIENT_SECRET: ${BOODSCHAPPEN_OIDC_CLIENT_SECRET:-}
+
       MEALIE_URL: ${MEALIE_URL:?set MEALIE_URL in .env}
       MEALIE_TOKEN: ${MEALIE_TOKEN:?set MEALIE_TOKEN in .env}
       MEALIE_LIST: ${MEALIE_LIST:-Boodschappen}
