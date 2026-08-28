@@ -308,8 +308,7 @@ async Task<IResult> HandlePasswordLoginAsync(HttpContext ctx, AppOptions opt, IL
     {
         // Loggable signal for fail2ban / the reverse proxy.
         log.LogWarning("Failed login attempt from {Ip}", ctx.Connection.RemoteIpAddress);
-        return Results.Content(Html.LoginPage.Replace("<!--ERROR-->",
-            "<p class=\"err\">Onjuist wachtwoord</p>"), "text/html");
+        return Results.Content(await LoginPage.Create(true).RenderAsync(), "text/html");
     }
 
     var identity = new ClaimsIdentity(
@@ -331,14 +330,13 @@ async Task<IResult> HandlePasswordLoginAsync(HttpContext ctx, AppOptions opt, IL
 // handler's own redirect-to-/login (with ?ReturnUrl=...) is what lands here for
 // any unauthenticated request, so the original destination is preserved through
 // the round trip to Authentik and back.
-app.MapGet("/login", (HttpContext ctx, AppOptions opt) =>
+app.MapGet("/login", async (HttpContext ctx, AppOptions opt) =>
 {
     if (!opt.OidcEnabled)
-        return Results.Content(Html.LoginPage, "text/html");
+        return Results.Content(await LoginPage.Create(false).RenderAsync(), "text/html");
 
     var returnUrl = ctx.Request.Query["ReturnUrl"].ToString();
-    var page = Html.OidcLoginPage.Replace("<!--RETURNURL-->",
-        System.Net.WebUtility.HtmlEncode(string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl));
+    var page = await OidcLoginPage.Create(string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl).RenderAsync();
     return Results.Content(page, "text/html");
 }).AllowAnonymous();
 
@@ -362,7 +360,7 @@ app.MapPost("/login", async (HttpContext ctx, AppOptions opt, ILogger<Program> l
 // ordinary OIDC user.
 if (options.OidcEnabled && options.AppPassword.Length > 0)
 {
-    app.MapGet("/login/admin", () => Results.Content(Html.LoginPage, "text/html"))
+    app.MapGet("/login/admin", async () => Results.Content(await LoginPage.Create(false).RenderAsync(), "text/html"))
        .AllowAnonymous();
 
     app.MapPost("/login/admin", (HttpContext ctx, AppOptions opt, ILogger<Program> log) =>

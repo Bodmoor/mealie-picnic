@@ -1,91 +1,14 @@
 namespace MealiePicnic.Presentation;
 
 /// <summary>
-/// The whole UI, served as two strings. No build step, no npm, no framework.
+/// The app shell, served as a string. No build step, no npm -- the login pages
+/// moved to Slices/LoginPage.cshtml and Slices/OidcLoginPage.cshtml (RazorSlices
+/// auto-escapes, so nothing here hand-encodes user-influenced values any more),
+/// but this one page has no per-request data model, so there is nothing a slice
+/// would buy it.
 /// </summary>
 public static class Html
 {
-    public const string LoginPage = """
-        <!doctype html>
-        <html lang="nl"><meta charset="utf-8">
-        <meta name="viewport" content="width=device-width,initial-scale=1">
-        <link rel="icon" href="/favicon.ico" type="image/png">
-        <link rel="icon" href="/icons/192.png" sizes="192x192" type="image/png">
-        <link rel="apple-touch-icon" href="/icons/192.png">
-        <link rel="manifest" href="/manifest.webmanifest">
-        <meta name="theme-color" content="#1d2024">
-        <meta name="mobile-web-app-capable" content="yes">
-        <title>Inloggen</title>
-        <style>
-          :root { color-scheme: dark }
-          body { font:15px system-ui,sans-serif; background:#15171a; color:#e8eaed;
-                 display:grid; place-items:center; height:100vh; margin:0 }
-          form { background:#1d2024; border:1px solid #2a2d31; border-radius:12px;
-                 padding:28px; width:290px }
-          h1 { font-size:17px; margin:0 }
-          .brand { display:flex; align-items:center; gap:11px; margin-bottom:18px }
-          .brand img { border-radius:8px }
-          input { width:100%; padding:9px 11px; border-radius:7px; border:1px solid #3a3d41;
-                  background:#15171a; color:#e8eaed; box-sizing:border-box; font-size:15px }
-          button { width:100%; margin-top:12px; padding:9px; border:0; border-radius:7px;
-                   background:#3f7fbf; color:#fff; font-size:15px; cursor:pointer }
-          button:hover { background:#4a8fd4 }
-          .err { color:#e59a9a; font-size:13px; margin:12px 0 0 }
-        </style>
-        <form method="post" action="/login">
-          <div class="brand">
-            <img src="/icons/192.png" width="40" height="40" alt="">
-            <h1>Mealie &rarr; Picnic</h1>
-          </div>
-          <input type="password" name="password" placeholder="Wachtwoord" autofocus>
-          <button type="submit">Inloggen</button>
-          <!--ERROR-->
-        </form>
-        </html>
-        """;
-
-    /// <summary>
-    /// Shown at GET /login when OIDC is configured, instead of auto-challenging.
-    /// Authentik's own SSO session usually re-authenticates silently once
-    /// challenged, so without a page like this, signing out of the app just
-    /// bounces straight back in with no visible transition -- there needs to be
-    /// a deliberate click in between.
-    /// </summary>
-    public const string OidcLoginPage = """
-        <!doctype html>
-        <html lang="nl"><meta charset="utf-8">
-        <meta name="viewport" content="width=device-width,initial-scale=1">
-        <link rel="icon" href="/favicon.ico" type="image/png">
-        <link rel="icon" href="/icons/192.png" sizes="192x192" type="image/png">
-        <link rel="apple-touch-icon" href="/icons/192.png">
-        <link rel="manifest" href="/manifest.webmanifest">
-        <meta name="theme-color" content="#1d2024">
-        <meta name="mobile-web-app-capable" content="yes">
-        <title>Inloggen</title>
-        <style>
-          :root { color-scheme: dark }
-          body { font:15px system-ui,sans-serif; background:#15171a; color:#e8eaed;
-                 display:grid; place-items:center; height:100vh; margin:0 }
-          form { background:#1d2024; border:1px solid #2a2d31; border-radius:12px;
-                 padding:28px; width:290px }
-          h1 { font-size:17px; margin:0 }
-          .brand { display:flex; align-items:center; gap:11px; margin-bottom:18px }
-          .brand img { border-radius:8px }
-          button { width:100%; padding:9px; border:0; border-radius:7px;
-                   background:#3f7fbf; color:#fff; font-size:15px; cursor:pointer }
-          button:hover { background:#4a8fd4 }
-        </style>
-        <form method="get" action="/login/oidc">
-          <div class="brand">
-            <img src="/icons/192.png" width="40" height="40" alt="">
-            <h1>Mealie &rarr; Picnic</h1>
-          </div>
-          <input type="hidden" name="ReturnUrl" value="<!--RETURNURL-->">
-          <button type="submit">Inloggen met SSO</button>
-        </form>
-        </html>
-        """;
-
     public const string AppPage = """
         <!doctype html>
         <html lang="nl"><meta charset="utf-8">
