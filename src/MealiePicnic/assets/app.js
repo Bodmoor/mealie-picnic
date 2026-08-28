@@ -181,9 +181,15 @@ document.addEventListener('alpine:init', () => {
   // the card is near the viewport -- a search grid can hold ninety cards, and
   // eagerly fetching facts for all of them would be ninety calls for a grid the
   // user scrolls past.
-  Alpine.data('factsLoader', (productId) => ({
+  //
+  // Registered with no constructor argument: the CSP build cannot evaluate a
+  // call expression like x-data="factsLoader('s123')" (issue #26), so the
+  // product id instead rides along as a data-product-id attribute and is read
+  // from $el once the component initialises.
+  Alpine.data('factsLoader', () => ({
     html: '',
     init() {
+      const productId = this.$el.dataset.productId;
       const observer = new IntersectionObserver(async (entries) => {
         if (!entries[0].isIntersecting) return;
         observer.disconnect();
