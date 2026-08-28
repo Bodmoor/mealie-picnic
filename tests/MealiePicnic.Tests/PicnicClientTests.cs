@@ -441,6 +441,21 @@ public class PicnicClientTests
         """;
 
     [Fact]
+    public async Task Details_finds_salt_even_when_the_accordion_header_is_worded_differently()
+    {
+        // Issue #33: the header-text match ("Voedingswaarde"/"nutrition") is
+        // Picnic's own wording, not a stable contract. A rename (or a different
+        // section entirely carrying the table) must not silently blank the salt.
+        var page = ProductPage.Replace("**Voedingswaarde**", "**Extra informatie**");
+        var handler = new StubHandler().OnJson("product-details-page-root", page);
+
+        var details = await TestFactory.Picnic(handler, tokens: Tokens("tok"))
+            .GetDetailsAsync("s1000001", default);
+
+        Assert.Equal(0.11, details.SaltGramsPer100!.Value, 3);
+    }
+
+    [Fact]
     public async Task Details_reads_the_salt_from_the_nutrition_accordion()
     {
         var handler = new StubHandler().OnJson("product-details-page-root", ProductPage);
