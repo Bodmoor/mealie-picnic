@@ -203,20 +203,28 @@ document.addEventListener('alpine:init', () => {
   // call expression like x-data="factsLoader('s123')" (issue #26), so the
   // product id instead rides along as a data-product-id attribute and is read
   // from $el once the component initialises.
+  // The result is written straight to the element rather than bound through
+  // x-html: the CSP build rejects that directive outright ("Using the x-html
+  // directive is prohibited in the CSP build"), which is what kept the facts
+  // invisible even once the fetch itself was working (issue #33). Assigning
+  // innerHTML from this file is fine -- the CSP restriction is on Alpine
+  // evaluating expressions, not on ordinary JS in a same-origin script -- and
+  // it is what the pre-refactor code did too. The markup is built here from our
+  // own endpoint's booleans and numbers, never from product text.
   Alpine.data('factsLoader', () => ({
-    html: '',
     init() {
-      const productId = this.$el.dataset.productId;
+      const el = this.$el;
+      const productId = el.dataset.productId;
       const observer = new IntersectionObserver(async (entries) => {
         if (!entries[0].isIntersecting) return;
         observer.disconnect();
         try {
           const r = await fetch('/api/details/' + encodeURIComponent(productId));
           if (!r.ok) return; // a nicety on top of the pick; failing must not surface an error
-          this.html = factsHtml(await r.json());
+          el.innerHTML = factsHtml(await r.json());
         } catch { /* same: silent */ }
       }, { rootMargin: '250px' });
-      observer.observe(this.$el);
+      observer.observe(el);
     },
   }));
 });
