@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace MealiePicnic.Presentation;
 
@@ -39,4 +41,20 @@ public static class Vendor
 
     /// <summary>This app's own Picnic-auth/2FA and product-facts client logic.</summary>
     public static string AppJs { get; } = Load("app.js");
+
+    // /assets/{name} is cached for a week (Program.cs) so a repeat visitor is not
+    // re-downloading htmx/Alpine/app.js on every load, but that same week is how
+    // long a fixed URL like /assets/app.js would keep serving a FIXED (and, for
+    // app.js, potentially already-fixed-server-side-but-not-client-side) old
+    // version after a deploy (issue #33: the server-side scrape was correct all
+    // along, the browser was just still running last week's app.js). Html.AppPage
+    // appends this hash to each script's URL, so a content change is a URL
+    // change -- the old cached entry is simply never requested again -- while an
+    // unchanged file keeps its long cache untouched.
+    public static string HtmxVersion { get; } = Hash(HtmxJs);
+    public static string AlpineCspVersion { get; } = Hash(AlpineCspJs);
+    public static string AppJsVersion { get; } = Hash(AppJs);
+
+    private static string Hash(string content) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)))[..8];
 }

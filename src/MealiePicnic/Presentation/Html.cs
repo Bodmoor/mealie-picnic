@@ -9,7 +9,17 @@ namespace MealiePicnic.Presentation;
 /// </summary>
 public static class Html
 {
-    public const string AppPage = """
+    // Computed once, not const: the raw template's script URLs get a
+    // ?v={content hash} appended (see Vendor.cs) so a week-long client cache on
+    // /assets/{name} cannot keep serving a stale app.js past a deploy. Still one
+    // fixed string served identically to every request -- nothing here is
+    // per-request data.
+    public static readonly string AppPage = AppPageTemplate
+        .Replace("/assets/htmx.min.js", $"/assets/htmx.min.js?v={Vendor.HtmxVersion}")
+        .Replace("/assets/alpine-csp.min.js", $"/assets/alpine-csp.min.js?v={Vendor.AlpineCspVersion}")
+        .Replace("/assets/app.js", $"/assets/app.js?v={Vendor.AppJsVersion}");
+
+    private const string AppPageTemplate = """
         <!doctype html>
         <html lang="nl"><meta charset="utf-8">
         <meta name="viewport" content="width=device-width,initial-scale=1">
