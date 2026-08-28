@@ -164,10 +164,18 @@ public static class Quantities
 
         var needed = quantity * unit.Value;
 
-        if (pack is { } p && p.Dimension == unit.Dimension && p.Value > 0)
-            return Clamp(Math.Ceiling(needed / p.Value));
+        if (pack is { } p)
+        {
+            // Known pack, wrong dimension: no honest conversion (issue #10 --
+            // "5 uien" against a "1 kilo" bag is not 5 bags). One is the safe
+            // answer, whichever direction the mismatch runs.
+            if (p.Dimension != unit.Dimension || p.Value <= 0)
+                return 1;
 
-        // No usable pack size. Countable lines still mean what they say;
+            return Clamp(Math.Ceiling(needed / p.Value));
+        }
+
+        // No pack size known at all. Countable lines still mean what they say;
         // a weight or volume without a pack size tells us nothing about count.
         return unit.Dimension is Dimension.Count ? Clamp(Math.Ceiling(needed)) : 1;
     }

@@ -47,9 +47,12 @@ public class QuantitiesTests
     // Countable against a countable pack: a pack of 8 covers 3 wraps.
     [InlineData(3, "stuks", "8 stuks", 1)]
     [InlineData(12, "stuks", "8 stuks", 2)]
-    // Dimension mismatch (weight needed, pieces sold) is not comparable -> one.
+    // Dimension mismatch is not comparable, whichever way it runs -> one.
+    // Issue #10: "5 uien" against a "1 kilo" bag must not order 5 bags.
     [InlineData(500, "gram", "6 stuks", 1)]
-    [InlineData(3, "stuks", "500 gram", 3)]     // countable still counts
+    [InlineData(3, "stuks", "500 gram", 1)]
+    [InlineData(5, "stuks", "1 kilo", 1)]
+    [InlineData(5, null, "1 kilo", 1)]
     // Unparseable pack strings behave as though unknown.
     [InlineData(500, "gram", "2-3 porties", 1)]
     [InlineData(500, "gram", "", 1)]
