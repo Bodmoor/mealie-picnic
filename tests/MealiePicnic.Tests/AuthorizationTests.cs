@@ -23,6 +23,13 @@ public class AuthorizationTests
             builder.UseSetting("APP_PASSWORD", Password);
             builder.UseSetting("DATA_DIR",
                 Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+            // WebApplicationFactory loads the developer's real user secrets in
+            // Development regardless of the settings above, so a developer who
+            // has OIDC_* set locally (for manual testing) would otherwise flip
+            // these OIDC-disabled tests over to OIDC-enabled behaviour.
+            builder.UseSetting("OIDC_AUTHORITY", "");
+            builder.UseSetting("OIDC_CLIENT_ID", "");
+            builder.UseSetting("OIDC_CLIENT_SECRET", "");
         });
 
     private static HttpClient NewClient(WebApplicationFactory<Program> factory) =>
@@ -131,7 +138,9 @@ public class AuthorizationTests
         var cookie = Assert.Single(response.Headers.GetValues("Set-Cookie"),
             c => c.StartsWith("mealiepicnic="));
         Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("samesite=strict", cookie, StringComparison.OrdinalIgnoreCase);
+        // Lax, not Strict: an OIDC login redirect is a legitimate cross-site
+        // entry point, and Strict would not survive it (see Program.cs).
+        Assert.Contains("samesite=lax", cookie, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

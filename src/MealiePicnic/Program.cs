@@ -47,8 +47,15 @@ var authentication = builder.Services
         cookie.SlidingExpiration = true;
         cookie.Cookie.Name = "mealiepicnic";
         cookie.Cookie.HttpOnly = true;
-        // Strict is fine here: there are no legitimate cross-site entry flows.
-        cookie.Cookie.SameSite = SameSiteMode.Strict;
+        // Was Strict before OIDC existed, when the only way in was a same-site
+        // password form. An OIDC login is a legitimate cross-site entry point
+        // (the browser lands here via a redirect FROM the identity provider),
+        // and a Strict cookie set on that response is not sent on the very next
+        // navigation -- the sign-in silently doesn't "take" and /login loops
+        // forever. Lax still blocks cross-site POST/PUT, which is what matters
+        // for CSRF; it only additionally allows top-level GET navigation, which
+        // is exactly what a login redirect is.
+        cookie.Cookie.SameSite = SameSiteMode.Lax;
         // Always requires TLS end-to-end (or a proxy with TRUST_PROXY=true);
         // plain-HTTP local dev keeps working with COOKIE_SECURE=false (default).
         cookie.Cookie.SecurePolicy = options.CookieSecure
@@ -70,6 +77,12 @@ if (options.OidcEnabled)
         oidc.ClientId = options.OidcClientId;
         oidc.ClientSecret = options.OidcClientSecret;
         oidc.ResponseType = "code";
+        // Authentik's default is a form_post callback -- a cross-site POST back
+        // to us, which the correlation cookie's SameSite=Lax can't survive
+        // ("Correlation failed."). Forcing query mode makes the callback a
+        // plain GET redirect instead: an ordinary top-level navigation the
+        // Lax cookie is sent on.
+        oidc.ResponseMode = "query";
         // The cookie above is what actually carries the session; OIDC is only
         // consulted at challenge time.
         oidc.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
@@ -238,8 +251,11 @@ async Task<IResult> HandlePasswordLoginAsync(HttpContext ctx, AppOptions opt, IL
 }
 
 // Static files (the SPA) are behind auth too, hence no UseStaticFiles() before this.
-// With OIDC configured this is the only login path a user ever sees: it challenges
-// Authentik immediately instead of rendering the password form. The cookie
+// With OIDC configured this shows a "sign in" button rather than auto-challenging.
+// Authentik typically has its own active SSO session and re-authenticates
+// silently once challenged, so an immediate auto-challenge would make signing
+// out of the app instantly bounce back in with no visible transition -- this
+// page is the deliberate click that stands between the two. The cookie
 // handler's own redirect-to-/login (with ?ReturnUrl=...) is what lands here for
 // any unauthenticated request, so the original destination is preserved through
 // the round trip to Authentik and back.
@@ -248,6 +264,14 @@ app.MapGet("/login", (HttpContext ctx, AppOptions opt) =>
     if (!opt.OidcEnabled)
         return Results.Content(Html.LoginPage, "text/html");
 
+    var returnUrl = ctx.Request.Query["ReturnUrl"].ToString();
+    var page = Html.OidcLoginPage.Replace("<!--RETURNURL-->",
+        System.Net.WebUtility.HtmlEncode(string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl));
+    return Results.Content(page, "text/html");
+}).AllowAnonymous();
+
+app.MapGet("/login/oidc", (HttpContext ctx) =>
+{
     var returnUrl = ctx.Request.Query["ReturnUrl"].ToString();
     return Results.Challenge(
         new AuthenticationProperties { RedirectUri = string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl },
