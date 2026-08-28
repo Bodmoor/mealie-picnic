@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Threading.RateLimiting;
 using MealiePicnic;
@@ -663,20 +664,51 @@ api.MapPost("/basket", async (HttpContext ctx, MealieClient mealie, PicnicClient
     if (householdKey is null) return NoHousehold(ctx.User);
 
     var (_, resolvedListId, items) = await LoadListAsync(householdKey, listId, mealie, links, opt, ct);
+    var toAdd = items.Where(i => i.State == LinkState.Linked && !i.Checked).ToList();
+
+    // One request for the whole basket (issue #27), keyed by Picnic product id:
+    // two Mealie items can link to the same product, so their amounts are summed
+    // rather than sent as separate lines.
+    var quantities = new Dictionary<string, int>();
+    foreach (var item in toAdd)
+        quantities[item.PicnicUid!] = quantities.GetValueOrDefault(item.PicnicUid!) + item.Amount;
+
     var results = new List<CartResult>();
-    var consecutiveFailures = 0;
     var aborted = false;
+    var abortReason = "";
 
-    foreach (var item in items.Where(i => i.State == LinkState.Linked && !i.Checked))
+    if (quantities.Count > 0)
     {
-        ct.ThrowIfCancellationRequested();
-
+        JsonNode? cart = null;
         try
         {
-            // Throws unless the product is verifiably in the cart, so nothing below
-            // runs for a refused add (issue #7).
-            await picnic.AddToCartAsync(item.PicnicUid!, item.Amount, ct);
-            consecutiveFailures = 0;
+            cart = await picnic.AddProductsToCartAsync(quantities, ct);
+        }
+        // These must not be swallowed: the 401 middleware turns the auth failure
+        // into the login dialog, and cancellation must stop here.
+        catch (PicnicAuthException) { throw; }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            // Full detail to the log; only a short, stable message to the client
+            // (upstream error bodies can contain internal paths and payloads).
+            log.LogWarning(ex, "Batch basket add failed for {Count} products", quantities.Count);
+            aborted = true;
+            abortReason = ex is HttpRequestException ? "upstream request failed" : "internal error";
+        }
+
+        foreach (var item in toAdd)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            // Verifiably in the cart, not just a cheerful status code (issue #7):
+            // still true for the batch call, which answers with the updated cart.
+            if (aborted || cart is null || !PicnicClient.CartHasProduct(cart, item.PicnicUid!))
+            {
+                results.Add(new CartResult(item.FoodName, item.PicnicUid!, item.Amount, false,
+                    aborted ? abortReason : "Picnic weigerde het product"));
+                continue;
+            }
 
             var checkedOff = false;
             if (checkOff)
@@ -700,36 +732,6 @@ api.MapPost("/basket", async (HttpContext ctx, MealieClient mealie, PicnicClient
             results.Add(new CartResult(
                 item.FoodName, item.PicnicUid!, item.Amount, true, null, checkedOff));
         }
-        // These must not be swallowed per-item: the 401 middleware turns the auth
-        // failure into the login dialog, and cancellation must stop the loop.
-        catch (PicnicAuthException) { throw; }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            // Full detail to the log; only a short, stable message to the client
-            // (upstream error bodies can contain internal paths and payloads).
-            log.LogWarning(ex, "Basket add failed for {Food} ({Uid})", item.FoodName, item.PicnicUid);
-            var reason = ex switch
-            {
-                // Picnic said no (or silently did not add it): worth showing, since
-                // the item stays on the Mealie list and can be re-linked.
-                PicnicCartException => "Picnic weigerde het product",
-                HttpRequestException => "upstream request failed",
-                _ => "internal error",
-            };
-            results.Add(new CartResult(item.FoodName, item.PicnicUid!, item.Amount, false, reason));
-
-            // A burst of failures usually means Picnic is refusing us; hammering an
-            // unofficial API from here only invites anti-abuse measures.
-            if (++consecutiveFailures >= 3)
-            {
-                aborted = true;
-                break;
-            }
-        }
-
-        // Gentle pacing against an undocumented API.
-        await Task.Delay(TimeSpan.FromMilliseconds(250), ct);
     }
 
     var skipped = items.Count(i => i.State == LinkState.New);
