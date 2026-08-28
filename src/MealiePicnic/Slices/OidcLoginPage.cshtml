@@ -21,21 +21,27 @@
   :root { color-scheme: dark }
   body { font:15px system-ui,sans-serif; background:#15171a; color:#e8eaed;
          display:grid; place-items:center; height:100vh; margin:0 }
-  form { background:#1d2024; border:1px solid #2a2d31; border-radius:12px;
-         padding:28px; width:290px }
+  .card { background:#1d2024; border:1px solid #2a2d31; border-radius:12px;
+          padding:28px; width:290px; box-sizing:border-box }
   h1 { font-size:17px; margin:0 }
   .brand { display:flex; align-items:center; gap:11px; margin-bottom:18px }
   .brand img { border-radius:8px }
-  button { width:100%; padding:9px; border:0; border-radius:7px;
-           background:#3f7fbf; color:#fff; font-size:15px; cursor:pointer }
-  button:hover { background:#4a8fd4 }
+  .btn { display:block; width:100%; padding:9px; border:0; border-radius:7px;
+         background:#3f7fbf; color:#fff; font-size:15px; cursor:pointer;
+         text-align:center; text-decoration:none; box-sizing:border-box }
+  .btn:hover { background:#4a8fd4 }
 </style>
-<form method="get" action="/login/oidc">
+<div class="card">
   <div class="brand">
     <img src="/icons/192.png" width="40" height="40" alt="">
     <h1>Mealie &rarr; Picnic</h1>
   </div>
-  <input type="hidden" name="ReturnUrl" value="@returnUrl">
-  <button type="submit">Inloggen met SSO</button>
-</form>
+  @* A plain link, not a form submit: the CSP's form-action 'self' (deliberately
+     strict, see Program.cs) applies to a form's whole resulting redirect chain in
+     Chrome, not just its own same-origin action -- so a <form> here got silently
+     blocked from ever reaching the OIDC authority's cross-origin authorize page.
+     form-action does not govern ordinary link navigation, so an <a> sidesteps it
+     without loosening the policy. *@
+  <a class="btn" href="@($"/login/oidc?ReturnUrl={Uri.EscapeDataString(returnUrl)}")">Inloggen met SSO</a>
+</div>
 </html>
