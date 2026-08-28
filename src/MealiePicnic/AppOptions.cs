@@ -36,16 +36,22 @@ public sealed class AppOptions
 
     /// <summary>
     /// Force the Secure flag on the session cookie (requires TLS, directly or via
-    /// a trusted proxy). Off by default so plain-HTTP local dev keeps working;
-    /// turn it on for any deployment that is reachable beyond loopback.
+    /// a trusted proxy). On by default -- HTTPS must be assumed, or a cookie meant
+    /// to be TLS-only silently isn't. Set to false explicitly for plain-HTTP local
+    /// dev (loopback only; never for a deployment reachable beyond that).
     /// </summary>
-    public bool CookieSecure { get; init; }
+    public bool CookieSecure { get; init; } = true;
 
     /// <summary>
-    /// Honour X-Forwarded-For / X-Forwarded-Proto from a reverse proxy. Only
-    /// enable when a proxy is actually in front: it trusts those headers blindly.
+    /// Honour X-Forwarded-For / X-Forwarded-Proto from a reverse proxy. On by
+    /// default, since a TLS-terminating proxy is the norm for anything beyond
+    /// loopback -- without this, the app builds absolute URLs (e.g. the OIDC
+    /// redirect_uri) from the scheme of the proxy-to-app hop, which is http even
+    /// when the browser-to-proxy hop is https, and a mismatched redirect_uri is
+    /// rejected by the identity provider. Set to false explicitly when nothing
+    /// is actually in front (it would otherwise trust forwarded headers blindly).
     /// </summary>
-    public bool TrustProxy { get; init; }
+    public bool TrustProxy { get; init; } = true;
 
     public string PicnicBaseUrl =>
         $"https://storefront-prod.{PicnicCountry.ToLowerInvariant()}.picnicinternational.com/api/{PicnicApiVersion}";
@@ -87,8 +93,10 @@ public sealed class AppOptions
             OidcClientSecret = Get("BOODSCHAPPEN_OIDC_CLIENT_SECRET"),
             DataDir = Get("DATA_DIR", "/data"),
             SearchCacheMinutes = int.TryParse(Get("SEARCH_CACHE_MINUTES"), out var m) ? m : 30,
-            CookieSecure = bool.TryParse(Get("COOKIE_SECURE"), out var cs) && cs,
-            TrustProxy = bool.TryParse(Get("TRUST_PROXY"), out var tp) && tp,
+            // Unset/unparsable defaults to true (HTTPS enforced) -- must be set to
+            // the literal string "false" to opt out, e.g. for plain-HTTP local dev.
+            CookieSecure = !bool.TryParse(Get("COOKIE_SECURE"), out var cs) || cs,
+            TrustProxy = !bool.TryParse(Get("TRUST_PROXY"), out var tp) || tp,
         };
 
         // Picnic credentials are deliberately not required: they can be typed into

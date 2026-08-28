@@ -5,9 +5,11 @@ services:
     container_name: mealie-picnic
     restart: unless-stopped
     ports:
-      # Loopback only by default: the app speaks plain HTTP and the session
-      # cookie would otherwise cross the LAN in cleartext. To expose it, put a
-      # TLS proxy in front and set COOKIE_SECURE=true, TRUST_PROXY=true.
+      # Loopback only. This local/dev compose file targets plain HTTP on
+      # localhost, so COOKIE_SECURE/TRUST_PROXY below are explicitly false here
+      # -- the app itself defaults both to true otherwise. To expose beyond
+      # loopback, put a TLS-terminating proxy in front and leave them unset
+      # (or set to true) in .env.
       - "127.0.0.1:8080:8080"
     environment:
       # --- web UI login (required) ---

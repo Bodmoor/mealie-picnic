@@ -29,6 +29,26 @@ public class AppOptionsTests
     }
 
     [Fact]
+    public void Cookie_secure_and_trust_proxy_default_to_true()
+    {
+        // HTTPS must be assumed unless told otherwise, or a deployment left
+        // unconfigured silently ships without either protection.
+        var options = Build(Required);
+
+        Assert.True(options.CookieSecure);
+        Assert.True(options.TrustProxy);
+    }
+
+    [Fact]
+    public void Cookie_secure_and_trust_proxy_can_be_opted_out_for_plain_http()
+    {
+        var options = Build([.. Required, ("COOKIE_SECURE", "false"), ("TRUST_PROXY", "false")]);
+
+        Assert.False(options.CookieSecure);
+        Assert.False(options.TrustProxy);
+    }
+
+    [Fact]
     public void Trims_trailing_slash_from_mealie_url()
     {
         // Paths are concatenated as $"{MealieUrl}/api/...", so a trailing

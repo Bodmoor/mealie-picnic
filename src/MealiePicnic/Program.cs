@@ -60,8 +60,9 @@ var authentication = builder.Services
         // for CSRF; it only additionally allows top-level GET navigation, which
         // is exactly what a login redirect is.
         cookie.Cookie.SameSite = SameSiteMode.Lax;
-        // Always requires TLS end-to-end (or a proxy with TRUST_PROXY=true);
-        // plain-HTTP local dev keeps working with COOKIE_SECURE=false (default).
+        // Enforced by default (requires TLS end-to-end, or a proxy with
+        // TRUST_PROXY=true); set COOKIE_SECURE=false explicitly for plain-HTTP
+        // local dev.
         cookie.Cookie.SecurePolicy = options.CookieSecure
             ? CookieSecurePolicy.Always
             : CookieSecurePolicy.SameAsRequest;
@@ -416,9 +417,32 @@ api.MapPost("/picnic/2fa/verify", async (Otp? body, PicnicClient picnic, Cancell
 
 // ----------------------------------------------------------------- shopping list
 
-// All shopping lists, for the picker in the UI.
-api.MapGet("/lists", async (MealieClient mealie, AppOptions opt, CancellationToken ct) =>
-    Results.Ok(new { defaultName = opt.MealieList, lists = await mealie.GetListsAsync(ct) }));
+// All shopping lists, for the picker in the UI. selectedListId is this
+// household's remembered choice (null when unresolved or never picked) --
+// server-side per household, not browser localStorage, so it doesn't leak
+// across identities sharing a browser/device or an impersonated session.
+api.MapGet("/lists", async (MealieClient mealie, HouseholdLinkStore links, AppOptions opt, HttpContext ctx, CancellationToken ct) =>
+{
+    var householdKey = HouseholdContext.KeyOf(ctx.User);
+    return Results.Ok(new
+    {
+        defaultName = opt.MealieList,
+        lists = await mealie.GetListsAsync(ct),
+        selectedListId = householdKey is null ? null : links.SelectedListId(householdKey),
+    });
+});
+
+api.MapPost("/lists/select", (ListSelection? body, HouseholdLinkStore links, HttpContext ctx) =>
+{
+    if (body is null || !Guid.TryParse(body.ListId, out _))
+        return Results.BadRequest(new { error = "invalid_list_id" });
+
+    var householdKey = HouseholdContext.KeyOf(ctx.User);
+    if (householdKey is null) return NoHousehold(ctx.User);
+
+    links.SelectList(householdKey, body.ListId);
+    return Results.Ok(new { ok = true });
+});
 
 // listId is optional: omitted falls back to the MEALIE_LIST default.
 api.MapGet("/list", async (string? listId, MealieClient mealie, HouseholdLinkStore links, HttpContext ctx, CancellationToken ct) =>
@@ -600,6 +624,7 @@ app.Run();
 internal record TwoFactorChannel(string? Channel);
 internal record Otp(string? Code);
 internal record FoodRef(string FoodId);
+internal record ListSelection(string ListId);
 internal record LinkRequest(string FoodId, string PicnicUid, string? Label, string? Pack);
 internal record BasketRequest(bool CheckOff, string? ListId);
 internal record LoginRequest(string? User, string? Password);
