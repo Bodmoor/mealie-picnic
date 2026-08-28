@@ -290,11 +290,13 @@ public sealed class PicnicClient(
         // nutrition item is where the salt is; the rest still counts as claim text
         // ("biologische tarwebloem" in an ingredient list means what it says).
         var nutrition = new List<string>();
+        var accordionAll = new List<string>();
         if (FindById(page, "accordion-list") is { } accordion)
         {
             found = true;
             foreach (var (title, body) in Sections(accordion))
             {
+                accordionAll.AddRange(body);
                 if (title.Contains("voedingswaarde", StringComparison.OrdinalIgnoreCase) ||
                     title.Contains("nutrition", StringComparison.OrdinalIgnoreCase))
                     nutrition.AddRange(body);
@@ -311,7 +313,14 @@ public sealed class PicnicClient(
             return new PicnicDetails(productId, false, null, null);
         }
 
-        var salt = ProductFacts.ParseSalt(nutrition);
+        // Falls back to every accordion section, not just the one titled
+        // "Voedingswaarde"/"nutrition" (issue #33): that title match is Picnic's
+        // wording, not ours, and a table sitting under a differently-worded or
+        // untitled section must not read as "no salt" just because the header
+        // didn't match. ParseSalt's own label regex ("zout"/"natrium" as a whole
+        // word, immediately followed by a per-100g-shaped amount) is specific
+        // enough that scanning ingredients/allergen text alongside it is safe.
+        var salt = ProductFacts.ParseSalt(nutrition) ?? ProductFacts.ParseSalt(accordionAll);
         return new PicnicDetails(
             Id: productId,
             Organic: ProductFacts.IsOrganic(claims),
