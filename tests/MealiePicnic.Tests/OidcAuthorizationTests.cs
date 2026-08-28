@@ -45,10 +45,26 @@ public class OidcAuthorizationTests
         factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
     [Fact]
-    public async Task Login_challenges_oidc_instead_of_showing_the_password_form()
+    public async Task Login_shows_a_sign_in_button_instead_of_the_password_form()
     {
+        // Not an auto-challenge: Authentik's own SSO session usually
+        // re-authenticates silently, so signing out of the app must not bounce
+        // straight back in with no visible transition -- there has to be a
+        // deliberate click first.
         using var factory = NewFactory();
         var response = await NewClient(factory).GetAsync("/login");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("Wachtwoord", body);
+        Assert.Contains("/login/oidc", body);
+    }
+
+    [Fact]
+    public async Task Login_oidc_challenges_authentik()
+    {
+        using var factory = NewFactory();
+        var response = await NewClient(factory).GetAsync("/login/oidc");
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         Assert.StartsWith(
