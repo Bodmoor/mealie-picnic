@@ -48,7 +48,10 @@ else
                 }
                 <div class="n">@p.Name</div>
                 <div class="p"><b>@p.PriceText</b> @p.UnitQuantity</div>
-                <div class="f" x-data="factsLoader" data-product-id="@p.Id" x-html="html"></div>
+                @* No x-html here: the @@alpinejs/csp build refuses that directive outright
+                   ("Using the x-html directive is prohibited in the CSP build"), so the
+                   component writes the markup from app.js instead (issue #33). *@
+                <div class="f" x-data="factsLoader" data-product-id="@p.Id"></div>
             </button>
         }
     </div>
