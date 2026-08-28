@@ -61,6 +61,22 @@ public class OidcAuthorizationTests
     }
 
     [Fact]
+    public async Task Sign_in_button_is_a_link_not_a_form_submit()
+    {
+        // The CSP's form-action 'self' (Program.cs) applies, in Chrome, to a
+        // form's whole resulting redirect chain -- not just the form's own
+        // same-origin action -- so a <form method=get action=/login/oidc> here
+        // got silently blocked from ever reaching the OIDC authority's
+        // cross-origin authorize page. form-action does not govern ordinary
+        // link navigation, so the button must stay a plain <a href>.
+        using var factory = NewFactory();
+        var body = await (await NewClient(factory).GetAsync("/login")).Content.ReadAsStringAsync();
+
+        Assert.DoesNotContain("<form", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("href=\"/login/oidc?ReturnUrl=", body);
+    }
+
+    [Fact]
     public async Task Login_oidc_challenges_authentik()
     {
         using var factory = NewFactory();
