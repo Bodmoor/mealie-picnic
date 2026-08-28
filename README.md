@@ -80,7 +80,10 @@ All via environment variables.
 
 | Variable               | Required | Default        | Notes                                     |
 | ---------------------- | -------- | -------------- | ----------------------------------------- |
-| `APP_PASSWORD`         | yes      | —              | password for the web UI                   |
+| `APP_PASSWORD`         | yes*     | —              | *not required once `OIDC_AUTHORITY` is set; still works there as a break-glass fallback at `/login/admin` (unlinked from the UI) |
+| `OIDC_AUTHORITY`       | no       | —              | Authentik issuer URL; setting this turns OIDC login on |
+| `OIDC_CLIENT_ID`       | no*      | —              | *required once `OIDC_AUTHORITY` is set     |
+| `OIDC_CLIENT_SECRET`   | no*      | —              | *required once `OIDC_AUTHORITY` is set; confidential client |
 | `MEALIE_URL`           | yes      | —              | e.g. `https://mealie.local`               |
 | `MEALIE_TOKEN`         | yes      | —              | Mealie → Profile → API Tokens; user secret locally |
 | `MEALIE_LIST`          | no       | `Boodschappen` | *default* list; the UI has a picker and remembers your choice |
@@ -120,8 +123,16 @@ sent to Mealie — which is where the sharp edges are:
 * `ProductFactsTests` — the organic and salt readers, weighted towards the false
   positives: "biologisch afbreekbaar" is biodegradable packaging, not organic food,
   and a "per 100 g" heading is not a salt figure.
-* `AppOptionsTests` — defaults, required keys, and blank values falling through.
-* `TokenStoreTests` — the token survives a restart, so 2FA stays rare.
+* `AppOptionsTests` — defaults, required keys, blank values falling through, and the
+  OIDC-vs-`APP_PASSWORD` required-key interplay.
+* `TokenStoreTests` — the token survives a restart, so 2FA stays rare; also that a
+  `null` key keeps writing the original flat layout, and different keys get isolated
+  `DATA_DIR/users/{key}/` slots.
+* `UserKeyTests` — the OIDC-`sub`-to-storage-key hash is stable, collision-free
+  between subjects, and falls back to a fixed constant for the panic login.
+* `OidcAuthorizationTests` — `/login` challenges Authentik instead of rendering the
+  password form once OIDC is configured, and `/login/admin` (the break-glass route)
+  exists only alongside `APP_PASSWORD`.
 
 ## How it works
 
@@ -175,7 +186,15 @@ POST /cart/add_product    {product_id, count}
   in the basket. If the add fails the line stays on the list; if the add succeeds but
   Mealie will not tick it off, that is reported separately rather than as a failure,
   because retrying would order it twice.
-* Auth is a single shared password behind a rate-limited login. The compose file
-  publishes on loopback only; for ANY exposure beyond that, a TLS-terminating
-  reverse proxy is required, with `COOKIE_SECURE=true` and `TRUST_PROXY=true` set —
-  otherwise the session cookie and `APP_PASSWORD` travel the network in cleartext.
+* Auth is a single shared password behind a rate-limited login, unless `OIDC_AUTHORITY`
+  is set, in which case OIDC (e.g. Authentik) is the primary login and `APP_PASSWORD`
+  becomes an optional break-glass fallback at `/login/admin` (deliberately not linked
+  from anywhere in the UI). Who may sign in via OIDC is controlled entirely by the
+  application/provider's own group policy bindings in Authentik — this app performs
+  no additional group/claim check of its own, and does not manage accounts. Every
+  signed-in identity gets its own cached Picnic token under `DATA_DIR/users/{key}/`
+  once OIDC is enabled; without OIDC the token stays in the original single, shared
+  location. Either way, the compose file publishes on loopback only; for ANY exposure
+  beyond that, a TLS-terminating reverse proxy is required, with `COOKIE_SECURE=true`
+  and `TRUST_PROXY=true` set — otherwise the session cookie and any password travel
+  the network in cleartext.

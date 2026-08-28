@@ -12,8 +12,19 @@ public sealed class AppOptions
     public string PicnicCountry { get; init; } = "NL";
     public string PicnicApiVersion { get; init; } = "15";
 
-    /// <summary>Password for the web UI login screen.</summary>
+    /// <summary>Password for the web UI login screen. Optional once OIDC is
+    /// configured, where it still works as a break-glass fallback at /login/admin.</summary>
     public string AppPassword { get; init; } = "";
+
+    /// <summary>Authentik (or any OIDC provider) issuer URL. Presence of this is
+    /// what turns OIDC login on; leave unset to keep the single-password login.</summary>
+    public string OidcAuthority { get; init; } = "";
+
+    public string OidcClientId { get; init; } = "";
+
+    public string OidcClientSecret { get; init; } = "";
+
+    public bool OidcEnabled => OidcAuthority.Length > 0;
 
     /// <summary>Mounted volume for the cached Picnic auth token.</summary>
     public string DataDir { get; init; } = "/data";
@@ -68,6 +79,9 @@ public sealed class AppOptions
             PicnicCountry = Get("PICNIC_COUNTRY", "NL"),
             PicnicApiVersion = Get("PICNIC_API_VERSION", "15"),
             AppPassword = Get("APP_PASSWORD"),
+            OidcAuthority = Get("OIDC_AUTHORITY"),
+            OidcClientId = Get("OIDC_CLIENT_ID"),
+            OidcClientSecret = Get("OIDC_CLIENT_SECRET"),
             DataDir = Get("DATA_DIR", "/data"),
             SearchCacheMinutes = int.TryParse(Get("SEARCH_CACHE_MINUTES"), out var m) ? m : 30,
             CookieSecure = bool.TryParse(Get("COOKIE_SECURE"), out var cs) && cs,
@@ -75,11 +89,17 @@ public sealed class AppOptions
         };
 
         // Picnic credentials are deliberately not required: they can be typed into
-        // the UI instead. These three have no such fallback.
+        // the UI instead. Mealie's are always required; APP_PASSWORD only when
+        // OIDC is not configured (otherwise it is an optional break-glass extra).
         var missing = new List<string>();
         if (options.MealieUrl.Length == 0) missing.Add("MEALIE_URL");
         if (options.MealieToken.Length == 0) missing.Add("MEALIE_TOKEN");
-        if (options.AppPassword.Length == 0) missing.Add("APP_PASSWORD");
+        if (!options.OidcEnabled && options.AppPassword.Length == 0) missing.Add("APP_PASSWORD");
+        if (options.OidcEnabled)
+        {
+            if (options.OidcClientId.Length == 0) missing.Add("OIDC_CLIENT_ID");
+            if (options.OidcClientSecret.Length == 0) missing.Add("OIDC_CLIENT_SECRET");
+        }
         if (missing.Count > 0)
             throw new InvalidOperationException(
                 "Missing configuration: " + string.Join(", ", missing) +

@@ -12,7 +12,7 @@ public class TokenStoreTests : IDisposable
     [Fact]
     public void Starts_empty()
     {
-        Assert.Null(New().Token);
+        Assert.Null(New().Token());
     }
 
     [Fact]
@@ -21,7 +21,7 @@ public class TokenStoreTests : IDisposable
         // The point of the store: 2FA should be rare, not once per restart.
         New().Save("token-abc");
 
-        Assert.Equal("token-abc", New().Token);
+        Assert.Equal("token-abc", New().Token());
     }
 
     [Fact]
@@ -32,8 +32,38 @@ public class TokenStoreTests : IDisposable
 
         store.Clear();
 
-        Assert.Null(store.Token);
-        Assert.Null(New().Token);
+        Assert.Null(store.Token());
+        Assert.Null(New().Token());
+    }
+
+    [Fact]
+    public void Legacy_key_uses_the_original_flat_layout()
+    {
+        // No userKey (today's only mode) must keep writing exactly where a
+        // pre-OIDC deployment expects the file, or upgrading loses the token.
+        New().Save("token-abc");
+
+        Assert.True(File.Exists(Path.Combine(_dir, "picnic-token")));
+    }
+
+    [Fact]
+    public void Different_keys_are_isolated()
+    {
+        var store = New();
+        store.Save("alice-token", "alice");
+        store.Save("bob-token", "bob");
+
+        Assert.Equal("alice-token", store.Token("alice"));
+        Assert.Equal("bob-token", store.Token("bob"));
+        Assert.Null(store.Token());
+    }
+
+    [Fact]
+    public void Keyed_tokens_live_under_a_users_subdirectory()
+    {
+        New().Save("token-abc", "alice");
+
+        Assert.True(File.Exists(Path.Combine(_dir, "users", "alice", "picnic-token")));
     }
 
     [Fact]
@@ -48,9 +78,9 @@ public class TokenStoreTests : IDisposable
     public void Device_id_is_stable_across_instances()
     {
         // Picnic binds 2FA verification to x-picnic-did: losing it forces a new 2FA.
-        var first = New().DeviceId;
+        var first = New().DeviceId();
 
-        Assert.Equal(first, New().DeviceId);
+        Assert.Equal(first, New().DeviceId());
         Assert.Matches("^[A-F0-9]{16}$", first);
     }
 
@@ -60,8 +90,8 @@ public class TokenStoreTests : IDisposable
         var other = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         try
         {
-            var a = New().DeviceId;
-            var b = new TokenStore(TestFactory.Options(other), NullLogger<TokenStore>.Instance).DeviceId;
+            var a = New().DeviceId();
+            var b = new TokenStore(TestFactory.Options(other), NullLogger<TokenStore>.Instance).DeviceId();
 
             Assert.NotEqual(a, b);   // a constant in source would fail this
         }
@@ -89,7 +119,7 @@ public class TokenStoreTests : IDisposable
         Directory.CreateDirectory(_dir);
         File.WriteAllText(Path.Combine(_dir, "picnic-token"), "");
 
-        Assert.Null(New().Token);
+        Assert.Null(New().Token());
     }
 
     [Fact]

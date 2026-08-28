@@ -85,4 +85,41 @@ public class AppOptionsTests
 
         Assert.Equal(30, options.SearchCacheMinutes);
     }
+
+    [Fact]
+    public void Oidc_is_disabled_when_authority_is_unset()
+    {
+        var options = Build(Required);
+
+        Assert.False(options.OidcEnabled);
+    }
+
+    [Fact]
+    public void Oidc_requires_client_id_and_secret_once_authority_is_set()
+    {
+        var settings = Required
+            .Append(("OIDC_AUTHORITY", "https://authentik.test/application/o/mealie/"))
+            .ToArray();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => Build(settings));
+
+        Assert.Contains("OIDC_CLIENT_ID", ex.Message);
+        Assert.Contains("OIDC_CLIENT_SECRET", ex.Message);
+    }
+
+    [Fact]
+    public void App_password_becomes_optional_once_oidc_is_configured()
+    {
+        var settings = Required.Where(s => s.Item1 != "APP_PASSWORD").Concat(
+        [
+            ("OIDC_AUTHORITY", "https://authentik.test/application/o/mealie/"),
+            ("OIDC_CLIENT_ID", "mealie-picnic"),
+            ("OIDC_CLIENT_SECRET", "secret"),
+        ]).ToArray();
+
+        var options = Build(settings);
+
+        Assert.True(options.OidcEnabled);
+        Assert.Equal("", options.AppPassword);
+    }
 }

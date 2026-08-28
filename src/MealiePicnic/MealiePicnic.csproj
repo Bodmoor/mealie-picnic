@@ -34,5 +34,8 @@
   <ItemGroup>
     <Folder Include="assets\" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.0" />
+  </ItemGroup>
 
 </Project>

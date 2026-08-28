@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Claims;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -159,7 +160,7 @@ public class PicnicClientTests
 
         await TestFactory.Picnic(handler, tokens: tokens).Verify2faAsync("123456", default);
 
-        Assert.Equal("fresh-token", tokens.Token);
+        Assert.Equal("fresh-token", tokens.Token());
     }
 
     [Fact]
@@ -173,7 +174,7 @@ public class PicnicClientTests
         Assert.Equal("tok", inspector.Headers["x-picnic-auth"]);
         // Per-install random device id; Picnic binds 2FA to it, so it must be the
         // store's stable value, not a constant shared by every deployment.
-        Assert.Equal(tokens.DeviceId, inspector.Headers["x-picnic-did"]);
+        Assert.Equal(tokens.DeviceId(), inspector.Headers["x-picnic-did"]);
         Assert.Matches("^[A-F0-9]{16}$", inspector.Headers["x-picnic-did"]);
         Assert.Contains("30100;", inspector.Headers["x-picnic-agent"]);
         Assert.Equal("okhttp/4.9.0", inspector.Headers["User-Agent"]);
@@ -199,7 +200,7 @@ public class PicnicClientTests
 
         await TestFactory.Picnic(handler, tokens: tokens).LogoutAsync(default);
 
-        Assert.Null(tokens.Token);
+        Assert.Null(tokens.Token());
         Assert.Contains(handler.Sent, c => c.Url.Contains("user/logout"));
     }
 
@@ -212,7 +213,7 @@ public class PicnicClientTests
 
         await TestFactory.Picnic(handler, tokens: tokens).LogoutAsync(default);
 
-        Assert.Null(tokens.Token);
+        Assert.Null(tokens.Token());
     }
 
     [Fact]
@@ -223,6 +224,41 @@ public class PicnicClientTests
         await TestFactory.Picnic(handler, tokens: Tokens()).LogoutAsync(default);
 
         Assert.Empty(handler.Sent);
+    }
+
+    // ---------------------------------------------------------------- OIDC per-user storage
+
+    private static ClaimsPrincipal Principal(string sub) =>
+        new(new ClaimsIdentity([new Claim("sub", sub)], "test"));
+
+    [Fact]
+    public void Tokens_are_isolated_per_user_once_oidc_is_enabled()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var options = TestFactory.Options(dir, oidcEnabled: true);
+        var tokens = new TokenStore(options, NullLogger<TokenStore>.Instance);
+
+        var alice = Principal("alice-sub");
+        var bob = Principal("bob-sub");
+        tokens.Save("alice-token", UserKey.From(alice));
+
+        // IHttpContextAccessor.HttpContext is backed by a process-wide AsyncLocal,
+        // so building both clients before asserting on either would have the
+        // second constructor's context silently win for both -- assert on each
+        // client right after it is built instead of batching the pair.
+        Assert.True(TestFactory.Picnic(new StubHandler(), options, tokens, alice).HasToken);
+        Assert.False(TestFactory.Picnic(new StubHandler(), options, tokens, bob).HasToken);
+    }
+
+    [Fact]
+    public void Token_is_shared_across_identities_when_oidc_is_disabled()
+    {
+        // TestFactory.Options defaults to OIDC disabled: whoever is signed in,
+        // PicnicClient must keep reading the one shared, legacy token slot.
+        var tokens = Tokens("shared-token");
+        var client = TestFactory.Picnic(new StubHandler(), tokens: tokens, user: Principal("alice-sub"));
+
+        Assert.True(client.HasToken);
     }
 
     private sealed class HeaderInspector : StubHandler

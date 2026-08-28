@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace MealiePicnic;
@@ -26,6 +27,7 @@ public sealed class PicnicClient(
     AppOptions options,
     TokenStore tokens,
     IMemoryCache cache,
+    IHttpContextAccessor accessor,
     ILogger<PicnicClient> log)
 {
     private const string Agent = "30100;1.236.1-15553;";
@@ -33,7 +35,13 @@ public sealed class PicnicClient(
     // x-picnic-did comes from the TokenStore: random per install, persisted, and
     // stable across restarts because Picnic binds 2FA verification to it.
 
-    public bool HasToken => tokens.Token is { Length: > 0 };
+    // Null (the shared, legacy slot) unless OIDC is enabled, in which case every
+    // signed-in identity -- OIDC or the /login/admin panic fallback -- gets its
+    // own TokenStore slot. See UserKey and TokenStore for the storage layout.
+    private string? UserKey =>
+        options.OidcEnabled ? MealiePicnic.UserKey.From(accessor.HttpContext?.User ?? new()) : null;
+
+    public bool HasToken => tokens.Token(UserKey) is { Length: > 0 };
 
     // ------------------------------------------------------------------ plumbing
 
@@ -44,9 +52,9 @@ public sealed class PicnicClient(
         request.Headers.TryAddWithoutValidation("Accept-Language",
             options.PicnicCountry.ToUpperInvariant() switch { "DE" => "de", "FR" => "fr", _ => "nl" });
         request.Headers.TryAddWithoutValidation("x-picnic-agent", Agent);
-        request.Headers.TryAddWithoutValidation("x-picnic-did", tokens.DeviceId);
+        request.Headers.TryAddWithoutValidation("x-picnic-did", tokens.DeviceId(UserKey));
 
-        if (tokens.Token is { Length: > 0 } token)
+        if (tokens.Token(UserKey) is { Length: > 0 } token)
             request.Headers.TryAddWithoutValidation("x-picnic-auth", token);
 
         if (body is not null)
@@ -60,8 +68,8 @@ public sealed class PicnicClient(
         if (response.Headers.TryGetValues("x-picnic-auth", out var values))
         {
             var fresh = values.FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(fresh) && fresh != tokens.Token)
-                tokens.Save(fresh);
+            if (!string.IsNullOrWhiteSpace(fresh) && fresh != tokens.Token(UserKey))
+                tokens.Save(fresh, UserKey);
         }
     }
 
@@ -492,7 +500,7 @@ public sealed class PicnicClient(
             }
         }
 
-        tokens.Clear();
+        tokens.Clear(UserKey);
         log.LogInformation("Picnic token cleared");
     }
 }
