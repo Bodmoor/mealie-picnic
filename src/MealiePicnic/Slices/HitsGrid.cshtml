@@ -1,0 +1,47 @@
+@inherits RazorSlice<HitsModel>
+@{
+    var it = Model.Item;
+    var products = Model.Products;
+    var stillLinked = !string.IsNullOrEmpty(it.PicnicUid) && products.All(p => p.Id != it.PicnicUid);
+}
+@if (stillLinked)
+{
+    <p class="muted">Huidige koppeling <b>@it.PicnicUid</b> staat niet in deze resultaten.</p>
+}
+@if (products.Count == 0)
+{
+    <p class="muted">Geen resultaten.</p>
+}
+else
+{
+    <div class="grid">
+        @foreach (var p in products)
+        {
+            var isLinked = p.Id == it.PicnicUid;
+            @* data-* attributes, read back via hx-vals="js:...": label/pack are free-text product
+               names from Picnic, and hand-building a JSON string by interpolating them into an
+               hx-vals attribute would break (or worse, mis-parse) on a name containing a quote. *@
+            <button class="card @(isLinked ? "linked" : "")"
+                    data-food-id="@it.FoodId" data-picnic-uid="@p.Id" data-label="@p.Name" data-pack="@p.UnitQuantity"
+                    hx-post="@($"/api/link?listId={Uri.EscapeDataString(Model.ListId)}")"
+                    hx-vals="js:{foodId: event.target.closest('.card').dataset.foodId, picnicUid: event.target.closest('.card').dataset.picnicUid, label: event.target.closest('.card').dataset.label, pack: event.target.closest('.card').dataset.pack}"
+                    hx-target="#view" hx-swap="outerHTML">
+                @if (!string.IsNullOrEmpty(p.ImageId))
+                {
+                    <img src="@($"/api/image/{Uri.EscapeDataString(p.ImageId)}")" loading="lazy" alt="">
+                }
+                else
+                {
+                    <div style="height:104px"></div>
+                }
+                @if (isLinked)
+                {
+                    <div class="badge">&check; gekoppeld</div>
+                }
+                <div class="n">@p.Name</div>
+                <div class="p"><b>@p.PriceText</b> @p.UnitQuantity</div>
+                <div class="f" x-data="factsLoader('@p.Id')"></div>
+            </button>
+        }
+    </div>
+}

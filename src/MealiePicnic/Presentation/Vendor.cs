@@ -3,11 +3,14 @@ using System.Reflection;
 namespace MealiePicnic.Presentation;
 
 /// <summary>
-/// Third-party JS, embedded and self-served rather than loaded from a CDN. A
-/// CDN script-src entry would be an external dependency and a wider CSP trust
-/// boundary for an app that holds a supermarket login; embedding matches how
-/// the PWA assets in <see cref="Icons"/> are already handled, and a version
-/// bump is a deliberate file swap instead of silent CDN drift.
+/// JS served as static files rather than inlined into a page: the third-party
+/// libraries, and this app's own <c>app.js</c>. A CDN script-src entry for the
+/// libraries would be an external dependency and a wider CSP trust boundary for
+/// an app that holds a supermarket login, so they are embedded and self-served
+/// instead, the same as the PWA assets in <see cref="Icons"/> -- a version bump
+/// is then a deliberate file swap rather than silent CDN drift. app.js is here
+/// rather than inline in the page for the same CSP reason: a strict script-src
+/// with no 'unsafe-inline' cannot run an inline &lt;script&gt; block at all.
 ///
 /// htmx needs neither 'unsafe-inline' nor 'unsafe-eval'. Alpine is the
 /// @alpinejs/csp build specifically (not the default build): it restricts
@@ -33,4 +36,7 @@ public static class Vendor
 
     /// <summary>@alpinejs/csp 3.x, minified.</summary>
     public static string AlpineCspJs { get; } = Load("alpine-csp.min.js");
+
+    /// <summary>This app's own Picnic-auth/2FA and product-facts client logic.</summary>
+    public static string AppJs { get; } = Load("app.js");
 }

@@ -1,0 +1,33 @@
+@inherits RazorSlice<BasketLogModel>
+@if (Model.Results.Count == 0)
+{
+    <div class="muted">Niets toegevoegd: geen gekoppelde items op deze lijst.</div>
+}
+else
+{
+    foreach (var r in Model.Results)
+    {
+        if (r.Ok)
+        {
+            <div class="ok">
+                &check; @r.Name x@r.Amount
+                @if (Model.CheckOff && !r.CheckedOff)
+                {
+                    <span class="muted">(in de kar, niet afgevinkt)</span>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="bad">&times; @r.Name: @r.Error <span class="muted">&mdash; blijft op de lijst</span></div>
+        }
+    }
+}
+@if (Model.Aborted)
+{
+    <div class="bad">Gestopt na herhaalde fouten; rest niet geprobeerd.</div>
+}
+@if (Model.Unmapped > 0)
+{
+    <div class="muted">@Model.Unmapped nog niet gekoppeld</div>
+}

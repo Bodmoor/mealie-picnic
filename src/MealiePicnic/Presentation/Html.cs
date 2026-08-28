@@ -176,560 +176,58 @@ public static class Html
           button:disabled:hover { border-color:#3a3d41 }
           dialog input { width:100%; padding:8px 10px; margin-top:8px; border-radius:6px;
                          border:1px solid #3a3d41; background:#15171a; color:#e8eaed }
+          [x-cloak] { display:none }
         </style>
 
         <a class="brand" href="/" title="Terug naar de lijst">
           <img src="/icons/192.png" width="34" height="34" alt="">
           <h1>Mealie &rarr; Picnic</h1>
         </a>
-        <div class="muted">
-          <span id="pstatus">Picnic: onbekend</span>
+        <div class="muted" x-data x-init="$store.picnic.refresh()" x-cloak>
+          <span x-show="$store.picnic.authenticated">Picnic: <b class="ok">ingelogd</b>
+            <a href="#" x-on:click.prevent="$store.picnic.logout()">uitloggen</a></span>
+          <span x-show="!$store.picnic.authenticated">Picnic: <b class="bad">niet ingelogd</b>
+            <a href="#" x-on:click.prevent="$store.picnic.promptLogin()">inloggen</a></span>
           &middot;
           <form method="post" action="/logout" style="display:inline">
             <button type="submit" class="linklike">afmelden bij deze app</button>
           </form>
         </div>
 
-        <div id="view"></div>
+        <div id="view" hx-get="/api/list" hx-trigger="load" hx-swap="outerHTML">
+          <p class="muted">Laden...</p>
+        </div>
 
         <dialog id="creds">
           <b>Picnic inloggen</b>
           <p class="muted" id="credsMsg"></p>
           <input id="cuser" placeholder="E-mailadres" autocomplete="username">
           <input id="cpass" type="password" autocomplete="current-password">
-          <div class="bar">
-            <button class="primary" onclick="submitCreds()">Inloggen</button>
-            <button onclick="document.getElementById('creds').close()">Sluiten</button>
+          <div class="bar" x-data>
+            <button class="primary" x-on:click="$store.picnic.submitCreds()">Inloggen</button>
+            <button x-on:click="$store.picnic.closeCreds()">Sluiten</button>
           </div>
         </dialog>
 
         <dialog id="twofa">
           <b>Picnic 2FA</b>
           <p class="muted" id="twofaMsg">Kies waar de code naartoe moet.</p>
-          <div class="bar">
+          <div class="bar" x-data>
             <button data-channel="SMS" data-label="SMS"
-                    onclick="send2fa('SMS')">SMS</button>
+                    x-on:click="$store.picnic.send2fa('SMS')">SMS</button>
             <button data-channel="EMAIL" data-label="E-mail"
-                    onclick="send2fa('EMAIL')">E-mail</button>
+                    x-on:click="$store.picnic.send2fa('EMAIL')">E-mail</button>
           </div>
           <input id="otp" placeholder="Code" inputmode="numeric">
-          <div class="bar">
-            <button class="primary" onclick="verify2fa()">Verifieren</button>
-            <button onclick="resetCooldown();document.getElementById('twofa').close()">Sluiten</button>
+          <div class="bar" x-data>
+            <button class="primary" x-on:click="$store.picnic.verify2fa()">Verifieren</button>
+            <button x-on:click="$store.picnic.closeTwofa()">Sluiten</button>
           </div>
         </dialog>
 
-        <script>
-        let items = [], showExcluded = false;
-        let lists = [], currentList = '';
-        // Last search results, so link() can record the product name it saw.
-        let lastProducts = [];
-
-        // Whatever we were doing when Picnic asked us to authenticate, so it can
-        // be resumed once login (and any 2FA) completes.
-        let pendingRetry = null;
-
-        async function runPending() {
-          const retry = pendingRetry;
-          pendingRetry = null;
-          if (retry) await retry();
-        }
-
-        const el = document.getElementById('view');
-        // RULE: every ${...} interpolation in this file is either a number we
-        // produced ourselves (${index}, ${done.length}) or wrapped in esc().
-        // Ids from Mealie/Picnic look safe today, but that is their invariant,
-        // not ours. The single quote matters most: values are placed inside
-        // single-quoted JS strings in onclick attributes.
-        const esc = s => String(s ?? '').replace(/[&<>"'`\/]/g,
-          c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',
-                 "'":'&#39;','`':'&#96;','/':'&#47;'}[c]));
-
-        // A 401 with error 'picnic_auth' means the Picnic token is missing or
-        // not 2FA-verified. Callers turn that into the login dialog.
-        class PicnicAuthError extends Error {}
-
-        async function handle(r) {
-          if (r.ok) return r.json();
-          const text = await r.text();
-          if (r.status === 401 && text.includes('picnic_auth')) throw new PicnicAuthError(text);
-          throw new Error(text);
-        }
-        async function jget(url) { return handle(await fetch(url)); }
-        async function jpost(url, body) {
-          return handle(await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
-                                          body: JSON.stringify(body ?? {})}));
-        }
-
-        // ---------------------------------------------------------------- picnic auth
-
-        // Mirrors /api/picnic/status. configuredPassword is only a flag: the
-        // password itself stays on the server.
-        let picnic = { authenticated: false, hasConfiguredUser: false,
-                       hasConfiguredPassword: false, configuredUser: '' };
-
-        async function refreshStatus() {
-          try {
-            picnic = await jget('/api/picnic/status');
-          } catch {
-            picnic = { authenticated: false, hasConfiguredUser: false,
-                       hasConfiguredPassword: false, configuredUser: '' };
-          }
-          renderStatus();
-          return picnic.authenticated;
-        }
-
-        function renderStatus() {
-          const host = document.getElementById('pstatus');
-          host.innerHTML = picnic.authenticated
-            ? `Picnic: <b class="ok">ingelogd</b>
-               <a href="#" onclick="picnicLogout();return false">uitloggen</a>`
-            : `Picnic: <b class="bad">niet ingelogd</b>
-               <a href="#" onclick="picnicLogin();return false">inloggen</a>`;
-        }
-
-        async function picnicLogout() {
-          try {
-            await jpost('/api/picnic/logout');
-          } catch (e) { /* the token is dropped server-side regardless */ }
-          await refreshStatus();
-        }
-
-        async function picnicLogin() {
-          if (picnic.authenticated) return;
-
-          // Everything present in configuration? Then no dialog is needed at all.
-          if (picnic.hasConfiguredUser && picnic.hasConfiguredPassword) {
-            await doLogin();
-            return;
-          }
-          openCreds();
-        }
-
-        function openCreds() {
-          // Prefill from configuration so the common case is one click.
-          document.getElementById('cuser').value = picnic.configuredUser || '';
-
-          const pass = document.getElementById('cpass');
-          pass.value = '';
-          pass.placeholder = picnic.hasConfiguredPassword
-            ? 'Laat leeg om het ingestelde wachtwoord te gebruiken'
-            : 'Wachtwoord';
-
-          const missing = [
-            picnic.hasConfiguredUser ? null : 'PICNIC_USER',
-            picnic.hasConfiguredPassword ? null : 'PICNIC_PASSWORD',
-          ].filter(Boolean);
-
-          document.getElementById('credsMsg').textContent = missing.length
-            ? `Niet ingesteld in de configuratie: ${missing.join(' en ')}. `
-              + 'Vul aan; er wordt niets opgeslagen, alleen het token wordt bewaard.'
-            : 'Gegevens komen uit de configuratie. Pas ze hier eventueel aan.';
-
-          document.getElementById('creds').showModal();
-        }
-
-        async function submitCreds() {
-          const user = document.getElementById('cuser').value.trim();
-          const pass = document.getElementById('cpass').value;
-
-          if (!user) { alert('Vul een e-mailadres in.'); return; }
-          if (!pass && !picnic.hasConfiguredPassword) { alert('Vul een wachtwoord in.'); return; }
-
-          document.getElementById('creds').close();
-          document.getElementById('cpass').value = '';
-          // A blank password means: use the one from configuration.
-          await doLogin({user, password: pass || null});
-        }
-
-        async function doLogin(creds) {
-          try {
-            const r = await jpost('/api/picnic/login', creds);
-            if (r.needs2fa) {
-              resetCooldown();
-              document.getElementById('twofaMsg').textContent = 'Kies waar de code naartoe moet.';
-              document.getElementById('twofa').showModal();
-              return;
-            }
-            await refreshStatus();
-            await runPending();
-          } catch (e) {
-            // A refused login also arrives as picnic_auth, but means wrong credentials.
-            if (e.message.includes('picnic_credentials')) {
-              openCreds();
-              return;
-            }
-            alert(e instanceof PicnicAuthError
-              ? 'Picnic weigerde de login. Controleer de gegevens.'
-              : 'Login mislukt: ' + e.message);
-          }
-        }
-
-        // Resend cooldown: both channel buttons are locked while a code is in flight
-        // and for a while after, so an impatient double-click cannot burn codes.
-        const RESEND_SECONDS = 30;
-        let cooldownTimer = null;
-
-        function channelButtons() {
-          return [...document.querySelectorAll('#twofa button[data-channel]')];
-        }
-
-        function startCooldown(seconds) {
-          clearInterval(cooldownTimer);
-          let left = seconds;
-
-          const tick = () => {
-            for (const button of channelButtons()) {
-              button.disabled = left > 0;
-              button.textContent = left > 0
-                ? `${button.dataset.label} (${left}s)`
-                : button.dataset.label;
-            }
-            if (left-- <= 0) clearInterval(cooldownTimer);
-          };
-
-          tick();
-          cooldownTimer = setInterval(tick, 1000);
-        }
-
-        function resetCooldown() {
-          clearInterval(cooldownTimer);
-          for (const button of channelButtons()) {
-            button.disabled = false;
-            button.textContent = button.dataset.label;
-          }
-        }
-
-        async function send2fa(channel) {
-          const buttons = channelButtons();
-          buttons.forEach(b => b.disabled = true);
-          document.getElementById('twofaMsg').textContent = 'Code aanvragen...';
-
-          try {
-            await jpost('/api/picnic/2fa/generate', {channel});
-            document.getElementById('twofaMsg').textContent =
-              `Code verstuurd via ${channel === 'EMAIL' ? 'e-mail' : channel}.`;
-            document.getElementById('otp').focus();
-            startCooldown(RESEND_SECONDS);
-          } catch (e) {
-            // Failed to send: let them retry straight away.
-            document.getElementById('twofaMsg').textContent = 'Kon geen code sturen: ' + e.message;
-            resetCooldown();
-          }
-        }
-
-        async function verify2fa() {
-          try {
-            await jpost('/api/picnic/2fa/verify', {code: document.getElementById('otp').value.trim()});
-            resetCooldown();
-            document.getElementById('otp').value = '';
-            document.getElementById('twofa').close();
-            await refreshStatus();
-            await runPending();
-          } catch (e) { alert('Verificatie mislukt: ' + e.message); }
-        }
-
-        // ---------------------------------------------------------------- list view
-
-        async function loadLists() {
-          try {
-            const r = await jget('/api/lists');
-            lists = r.lists;
-            // Fall back to the configured default when nothing is remembered
-            // server-side for this household, or when the remembered list has
-            // since been deleted in Mealie.
-            if (!currentList) currentList = r.selectedListId || '';
-            if (!currentList || !lists.some(l => l.id === currentList)) {
-              const fallback = lists.find(l =>
-                l.name.trim().toLowerCase() === r.defaultName.trim().toLowerCase());
-              currentList = (fallback ?? lists[0])?.id ?? '';
-            }
-          } catch { lists = []; }
-        }
-
-        async function pickList(id) {
-          currentList = id;
-          try { await jpost('/api/lists/select', {listId: id}); } catch { /* remembered next time instead */ }
-          loadList();
-        }
-
-        async function loadList() {
-          el.innerHTML = '<p class="muted">Laden...</p>';
-          try {
-            if (!lists.length) await loadLists();
-            const q = currentList ? '?listId=' + encodeURIComponent(currentList) : '';
-            items = await jget('/api/list' + q);
-            renderList();
-          } catch (e) { el.innerHTML = '<p class="bad">' + esc(e.message) + '</p>'; }
-        }
-
-        function tag(state) {
-          if (state === 0) return '<span class="tag new">nieuw</span>';
-          if (state === 1) return '<span class="tag linked">gekoppeld</span>';
-          return '<span class="tag">niet bij Picnic</span>';
-        }
-
-        function itemRow(it, index) {
-          const sub = it.state === 1
-            ? `${esc(it.picnicLabel || it.picnicUid)} &middot; ${esc(it.amountReason)}`
-            : esc(it.display);
-          return `<div class="item" onclick="openItem(${index})">
-                    <div>
-                      <div class="name">${esc(it.foodName)}</div>
-                      <div class="sub">${sub}${it.label ? ' &middot; ' + esc(it.label) : ''}</div>
-                    </div>
-                    ${tag(it.state)}
-                  </div>`;
-        }
-
-        function renderList() {
-          // Checked items are done: kept out of the buckets and out of the basket,
-          // but still visible in a collapsed section so nothing disappears silently.
-          const open = items.filter(i => !i.checked);
-          const fresh = open.filter(i => i.state === 0);
-          const linked = open.filter(i => i.state === 1);
-          const excluded = open.filter(i => i.state === 2);
-          const done = items.filter(i => i.checked);
-
-          el.innerHTML = `
-            <div class="bar">
-              <select onchange="pickList(this.value)" title="Mealie lijst">
-                ${lists.map(l => `<option value="${esc(l.id)}"
-                  ${l.id === currentList ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}
-              </select>
-              <button class="primary" onclick="loadList()">Haal Mealie lijst op</button>
-              <button onclick="addAll()">Alles in Picnic mand</button>
-              <label class="chk"><input type="checkbox" id="checkoff" checked> afvinken in Mealie</label>
-              <label class="chk"><input type="checkbox" ${showExcluded ? 'checked' : ''}
-                onchange="showExcluded=this.checked; renderList()"> toon uitgesloten</label>
-            </div>
-            <div id="basketlog" class="log"></div>
-
-            ${fresh.length ? '<h2>Nieuw (' + fresh.length + ')</h2>' +
-              fresh.map(i => itemRow(i, items.indexOf(i))).join('') : ''}
-
-            ${linked.length ? '<h2>Gekoppeld (' + linked.length + ')</h2>' +
-              linked.map(i => itemRow(i, items.indexOf(i))).join('') : ''}
-
-            ${showExcluded && excluded.length ? '<h2>Niet bij Picnic (' + excluded.length + ')</h2>' +
-              excluded.map(i => `<div class="item">
-                  <div><div class="name">${esc(i.foodName)}</div>
-                       <div class="sub">uitgesloten</div></div>
-                  <button class="tag" onclick="include('${esc(i.foodId)}')">terugzetten</button>
-                </div>`).join('') : ''}
-
-            ${done.length ? `
-              <details class="done-block">
-                <summary>Afgevinkt / toegevoegd aan mand (${done.length})</summary>
-                ${done.map(i => `<div class="item done-item">
-                    <div>
-                      <div class="name">${esc(i.foodName)}</div>
-                      <div class="sub">${esc(i.picnicLabel || i.picnicUid || i.display)}</div>
-                    </div>
-                    <span class="tag">afgevinkt</span>
-                  </div>`).join('')}
-              </details>` : ''}
-
-            ${items.length === 0 ? '<p class="muted">Lijst is leeg.</p>' : ''}
-            ${items.length > 0 && open.length === 0
-              ? '<p class="muted">Alles op deze lijst is afgevinkt.</p>' : ''}`;
-        }
-
-        async function include(foodId) {
-          await jpost('/api/include', {foodId});
-          await loadList();
-        }
-
-        // ---------------------------------------------------------------- search view
-
-        async function openItem(index) {
-          const it = items[index];
-          el.innerHTML = `<div class="bar"><button onclick="renderList()">&larr; terug</button>
-             <b>${esc(it.foodName)}</b>
-             ${it.picnicUid
-               ? `<span class="muted">gekoppeld aan
-                    ${esc(it.picnicLabel || it.picnicUid)}</span>`
-               : '<span class="muted">nog niet gekoppeld</span>'}</div>
-             <div class="bar">
-               <input id="term" value="${esc(it.foodName)}"
-                      style="padding:7px 10px;border-radius:7px;border:1px solid #3a3d41;
-                             background:#15171a;color:#e8eaed">
-               <button onclick="search(${index})">Zoek</button>
-               <button class="danger" onclick="exclude('${esc(it.foodId)}')">Niet bij Picnic</button>
-             </div>
-             <div id="hits"><p class="muted">Zoeken...</p></div>`;
-          search(index);
-        }
-
-        async function search(index) {
-          const it = items[index];
-          const term = document.getElementById('term')?.value || it.foodName;
-          const hits = document.getElementById('hits');
-          hits.innerHTML = '<p class="muted">Zoeken...</p>';
-          try {
-            const products = await jget('/api/search?term=' + encodeURIComponent(term));
-            lastProducts = products;
-            if (!products.length) { hits.innerHTML = '<p class="muted">Geen resultaten.</p>'; return; }
-            hits.innerHTML = '<div class="grid">' + products.map(p => {
-              // The product this food currently points at, if any.
-              const isLinked = p.id === it.picnicUid;
-              return `
-              <button class="card${isLinked ? ' linked' : ''}"
-                      onclick="link(${index},'${esc(p.id)}')">
-                ${p.imageId ? `<img src="/api/image/${esc(encodeURIComponent(p.imageId))}" loading="lazy" alt="">`
-                            : '<div style="height:104px"></div>'}
-                ${isLinked ? '<div class="badge">&check; gekoppeld</div>' : ''}
-                <div class="n">${esc(p.name)}</div>
-                <div class="p"><b>${esc(p.priceText)}</b> ${esc(p.unitQuantity)}</div>
-                <div class="f" data-facts="${esc(p.id)}"></div>
-              </button>`; }).join('') + '</div>';
-
-            // Facts come from a per-product page fetch, so they load after the
-            // grid and only for what is on screen.
-            observeFacts(hits);
-
-            // A linked product can fall outside the current result set, e.g. after
-            // renaming the food or when Picnic reshuffles its ranking.
-            if (it.picnicUid && !products.some(p => p.id === it.picnicUid)) {
-              hits.insertAdjacentHTML('afterbegin',
-                `<p class="muted">Huidige koppeling <b>${esc(it.picnicUid)}</b>`
-                + ' staat niet in deze resultaten.</p>');
-            }
-          } catch (e) {
-            if (e instanceof PicnicAuthError) {
-              hits.innerHTML = '<p class="muted">Niet ingelogd bij Picnic. Inloggen...</p>';
-              pendingRetry = () => search(index);
-              await picnicLogin();
-              return;
-            }
-            hits.innerHTML = '<p class="bad">' + esc(e.message) + '</p>';
-          }
-        }
-
-        // ---------------------------------------------------------------- product facts
-
-        // Issue #6: the organic mark and the salt content per 100 g. Neither is in
-        // the search response -- each needs its own product-page fetch upstream --
-        // so they are fetched per card, and only once a card is near the viewport.
-        // A search for "melk" returns ninety products; eagerly fetching all of them
-        // would be ninety calls for a grid the user scrolls past.
-        const factsCache = new Map();
-        let factsObserver = null;
-
-        function observeFacts(root) {
-          // One observer per result set: the previous grid is gone, and its
-          // pending observations would keep it alive.
-          factsObserver?.disconnect();
-          factsObserver = new IntersectionObserver(entries => {
-            for (const entry of entries) {
-              if (!entry.isIntersecting) continue;
-              factsObserver.unobserve(entry.target);
-              loadFacts(entry.target);
-            }
-          }, { rootMargin: '250px' });
-
-          root.querySelectorAll('[data-facts]').forEach(node => factsObserver.observe(node));
-        }
-
-        async function loadFacts(node) {
-          const id = node.dataset.facts;
-          try {
-            if (!factsCache.has(id)) {
-              factsCache.set(id, await jget('/api/details/' + encodeURIComponent(id)));
-            }
-            node.innerHTML = factsHtml(factsCache.get(id));
-          } catch (e) {
-            // Deliberately silent. These are a nicety on top of the pick; failing
-            // to fetch them must not put an error in front of the user, and must
-            // never trigger the Picnic login dialog (the search already would have).
-            factsCache.delete(id);
-          }
-        }
-
-        function factsHtml(d) {
-          const out = [];
-          if (d.organic) {
-            out.push('<img src="/icons/eu-organic.svg" alt="Biologisch"'
-                     + ' title="Het product wordt op de Picnic-pagina als biologisch aangeduid">');
-          }
-          if (typeof d.saltGramsPer100 === 'number') {
-            const g = d.saltGramsPer100;
-            // The EU front-of-pack thresholds: 1.5 g salt per 100 g is "high",
-            // 0.3 g is "low". Colouring beats a number nobody can calibrate.
-            const cls = g > 1.5 ? 'salt hi' : (g <= 0.3 ? 'salt lo' : 'salt');
-            const text = (Math.round(g * 100) / 100).toString().replace('.', ',');
-            // esc() even though cls is one of three literals above: the audit test
-            // treats "attribute value without esc" as unconditional, and an
-            // exception is how the next one slips through.
-            out.push(`<span class="${esc(cls)}" title="Zout per 100 g">${esc(text)} g zout</span>`);
-          }
-          return out.join('');
-        }
-
-        // ---------------------------------------------------------------- detail view
-
-        // One click links and returns to the list. There is no confirmation step,
-        // so relinking is the undo: pick another product for the same food.
-        async function link(index, productId) {
-          const it = items[index];
-          // Keep the product name alongside the id: a bare uid is undiagnosable later.
-          const product = lastProducts.find(p => p.id === productId);
-          const label = product?.name ?? '';
-          // unitQuantity ("1 kg", "6 stuks") is what lets the basket turn
-          // "500 gram" into a number of packs instead of 500 packs.
-          const pack = product?.unitQuantity ?? '';
-
-          const hits = document.getElementById('hits');
-          if (hits) hits.innerHTML = `<p class="muted">Koppelen aan ${esc(label || productId)}...</p>`;
-
-          try {
-            await jpost('/api/link', {foodId: it.foodId, picnicUid: productId, label, pack});
-            await loadList();
-          } catch (e) {
-            alert('Opslaan mislukt: ' + e.message);
-            await search(index);   // put the results back so another pick is possible
-          }
-        }
-
-        async function exclude(foodId) {
-          try {
-            await jpost('/api/exclude', {foodId});
-            await loadList();
-          } catch (e) { alert('Opslaan mislukt: ' + e.message); }
-        }
-
-        // ---------------------------------------------------------------- basket
-
-        async function addAll() {
-          const checkOff = document.getElementById('checkoff')?.checked ?? false;
-          const log = document.getElementById('basketlog');
-          log.innerHTML = '<div class="muted">Toevoegen...</div>';
-          try {
-            const r = await jpost('/api/basket', {checkOff, listId: currentList});
-            log.innerHTML = (r.results.length
-                ? r.results.map(x => x.ok
-                    ? `<div class="ok">&check; ${esc(x.name)} x${x.amount}${
-                         checkOff && !x.checkedOff
-                           ? ' <span class="muted">(in de kar, niet afgevinkt)</span>'
-                           : ''}</div>`
-                    : `<div class="bad">&times; ${esc(x.name)}: ${esc(x.error)}
-                         <span class="muted">&mdash; blijft op de lijst</span></div>`).join('')
-                : '<div class="muted">Niets toegevoegd: geen gekoppelde items op deze lijst.</div>')
-              + (r.aborted ? '<div class="bad">Gestopt na herhaalde fouten; rest niet geprobeerd.</div>' : '')
-              + (r.unmapped ? `<div class="muted">${r.unmapped} nog niet gekoppeld</div>` : '');
-            if (checkOff) await loadList();
-          } catch (e) { log.innerHTML = '<div class="bad">' + esc(e.message) + '</div>'; }
-        }
-
-        // Registering the service worker is what makes Android offer "install".
-        // Requires a secure context: HTTPS, or localhost. Over plain HTTP on a LAN
-        // address this silently does nothing -- expected, not an error.
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.register('/sw.js').catch(() => { /* not a secure context */ });
-        }
-
-        refreshStatus().then(loadLists).then(loadList);
-        </script>
+        <script src="/assets/app.js" defer></script>
+        <script src="/assets/alpine-csp.min.js" defer></script>
+        <script src="/assets/htmx.min.js" defer></script>
         </html>
         """;
 }

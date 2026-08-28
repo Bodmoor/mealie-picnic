@@ -6,7 +6,9 @@ using System.Threading.RateLimiting;
 using MealiePicnic;
 using MealiePicnic.Clients;
 using MealiePicnic.Presentation;
+using MealiePicnic.Slices;
 using MealiePicnic.Storage;
+using RazorSlices;
 using Microsoft.AspNetCore.Authentication;          // SignInAsync / SignOutAsync
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -182,13 +184,20 @@ if (options.TrustProxy)
 
 app.UseRateLimiter();
 
-// Minimal security headers. No CSP yet: the SPA still uses inline script and
-// inline event handlers, so a useful CSP needs that refactor first.
+// Minimal security headers.
 app.Use(async (ctx, next) =>
 {
     ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
     ctx.Response.Headers["X-Frame-Options"] = "DENY";
     ctx.Response.Headers["Referrer-Policy"] = "no-referrer";
+    // No 'unsafe-inline', no 'unsafe-eval': htmx needs neither, and Alpine is the
+    // @alpinejs/csp build, which restricts directive expressions to a safe
+    // subset instead of `new Function()`-evaluating arbitrary JS. Every script
+    // (htmx, Alpine, app.js) is a same-origin static file (see Vendor.cs) --
+    // nothing is inlined and nothing is loaded from a CDN, so 'self' covers it.
+    ctx.Response.Headers["Content-Security-Policy"] =
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
     await next();
 });
 
@@ -258,6 +267,25 @@ app.MapGet("/icons/{name}", (string name, HttpContext ctx) =>
 
 app.MapGet("/manifest.webmanifest", () =>
     Results.Content(Icons.Manifest, "application/manifest+json")).AllowAnonymous();
+
+// htmx, Alpine (CSP build) and this app's own client JS -- embedded and
+// self-served rather than CDN-loaded (see Vendor.cs). Only ever referenced from
+// the (authenticated) app shell, so no AllowAnonymous here, unlike the assets
+// above.
+app.MapGet("/assets/{name}", (string name, HttpContext ctx) =>
+{
+    var content = name switch
+    {
+        "htmx.min.js" => Vendor.HtmxJs,
+        "alpine-csp.min.js" => Vendor.AlpineCspJs,
+        "app.js" => Vendor.AppJs,
+        _ => null,
+    };
+    if (content is null) return Results.NotFound();
+
+    ctx.Response.Headers.CacheControl = week;
+    return Results.Content(content, "text/javascript");
+});
 
 app.MapGet("/sw.js", () =>
     // No caching: a stale service worker is how PWAs get stuck on old code.
@@ -416,11 +444,52 @@ api.MapPost("/picnic/2fa/verify", async (Otp? body, PicnicClient picnic, Cancell
 }).RequireRateLimiting("credentials");
 
 // ----------------------------------------------------------------- shopping list
+//
+// Below here, every response is an HTML fragment for htmx to swap in, not JSON --
+// the server renders (RazorSlices), the client just swaps. The one exception is
+// GET /lists, still JSON: nothing here consumes it (the picker is now server-
+// rendered by ListView itself), but nothing else needs it removed either.
 
-// All shopping lists, for the picker in the UI. selectedListId is this
-// household's remembered choice (null when unresolved or never picked) --
-// server-side per household, not browser localStorage, so it doesn't leak
-// across identities sharing a browser/device or an impersonated session.
+// Resolves which Mealie list to show when the caller did not name one: the
+// household's remembered choice if it still exists, else the configured default
+// by name, else whichever list is first. The old client-side loadLists() used to
+// do this from a cached list array; the server does it now that there is none.
+async Task<string> ResolveListIdAsync(
+    string householdKey, List<ShoppingListSummary> lists, HouseholdLinkStore links, AppOptions opt)
+{
+    var remembered = links.SelectedListId(householdKey);
+    if (remembered is not null && lists.Any(l => l.Id == remembered))
+        return remembered;
+
+    var fallback = lists.FirstOrDefault(l =>
+        l.Name.Trim().Equals(opt.MealieList.Trim(), StringComparison.OrdinalIgnoreCase));
+    return (fallback ?? lists.FirstOrDefault())?.Id ?? "";
+}
+
+async Task<(List<ShoppingListSummary> Lists, string ListId, List<ShoppingItem> Items)> LoadListAsync(
+    string householdKey, string? listId, MealieClient mealie, HouseholdLinkStore links, AppOptions opt,
+    CancellationToken ct)
+{
+    var lists = await mealie.GetListsAsync(ct);
+    var resolvedListId = string.IsNullOrEmpty(listId)
+        ? await ResolveListIdAsync(householdKey, lists, links, opt)
+        : listId;
+    var items = links.Merge(householdKey, await mealie.GetItemsAsync(
+        string.IsNullOrEmpty(resolvedListId) ? null : resolvedListId, ct));
+    return (lists, resolvedListId, items);
+}
+
+async Task<IResult> RenderListAsync(
+    string householdKey, string? listId, MealieClient mealie, HouseholdLinkStore links, AppOptions opt,
+    CancellationToken ct)
+{
+    var (lists, resolvedListId, items) = await LoadListAsync(householdKey, listId, mealie, links, opt, ct);
+    var html = await ListView.Create(new ListViewModel(lists, resolvedListId, items)).RenderAsync();
+    return Results.Content(html, "text/html");
+}
+
+// Still JSON: kept for anyone hitting the API directly, but nothing in the UI
+// calls it any more -- the list picker is server-rendered by ListView.
 api.MapGet("/lists", async (MealieClient mealie, HouseholdLinkStore links, AppOptions opt, HttpContext ctx, CancellationToken ct) =>
 {
     var householdKey = HouseholdContext.KeyOf(ctx.User);
@@ -432,20 +501,25 @@ api.MapGet("/lists", async (MealieClient mealie, HouseholdLinkStore links, AppOp
     });
 });
 
-api.MapPost("/lists/select", (ListSelection? body, HouseholdLinkStore links, HttpContext ctx) =>
+// Triggered by the list <select>'s own hx-post (a plain element with
+// name="listId", not a form -- htmx still sends it as ordinary form-urlencoded).
+api.MapPost("/lists/select", async (HttpContext ctx, MealieClient mealie, HouseholdLinkStore links, AppOptions opt, CancellationToken ct) =>
 {
-    if (body is null || !Guid.TryParse(body.ListId, out _))
+    var form = await ctx.Request.ReadFormAsync(ct);
+    var listId = form["listId"].ToString();
+    if (!Guid.TryParse(listId, out _))
         return Results.BadRequest(new { error = "invalid_list_id" });
 
     var householdKey = HouseholdContext.KeyOf(ctx.User);
     if (householdKey is null) return NoHousehold(ctx.User);
 
-    links.SelectList(householdKey, body.ListId);
-    return Results.Ok(new { ok = true });
+    links.SelectList(householdKey, listId);
+    return await RenderListAsync(householdKey, listId, mealie, links, opt, ct);
 });
 
-// listId is optional: omitted falls back to the MEALIE_LIST default.
-api.MapGet("/list", async (string? listId, MealieClient mealie, HouseholdLinkStore links, HttpContext ctx, CancellationToken ct) =>
+// listId omitted falls back to ResolveListIdAsync (remembered choice, or the
+// MEALIE_LIST default, or whatever list is first).
+api.MapGet("/list", async (string? listId, MealieClient mealie, HouseholdLinkStore links, AppOptions opt, HttpContext ctx, CancellationToken ct) =>
 {
     if (listId is not null && !Guid.TryParse(listId, out _))
         return Results.BadRequest(new { error = "invalid_list_id" });
@@ -453,17 +527,52 @@ api.MapGet("/list", async (string? listId, MealieClient mealie, HouseholdLinkSto
     var householdKey = HouseholdContext.KeyOf(ctx.User);
     if (householdKey is null) return NoHousehold(ctx.User);
 
-    var items = await mealie.GetItemsAsync(listId, ct);
-    return Results.Ok(links.Merge(householdKey, items));
+    return await RenderListAsync(householdKey, listId, mealie, links, opt, ct);
 });
 
-api.MapGet("/search", async (string term, PicnicClient picnic, CancellationToken ct) =>
-    Results.Ok(await picnic.SearchAsync(term, ct)));
+// The detail/search view for one food. listId rides along as a query param
+// (baked into every link that points here) purely so the eventual "back to the
+// list" fragment knows which list to re-render.
+api.MapGet("/items/{foodId}", async (string foodId, string? listId, MealieClient mealie, HouseholdLinkStore links, AppOptions opt, HttpContext ctx, CancellationToken ct) =>
+{
+    if (!Guid.TryParse(foodId, out _) || (listId is not null && !Guid.TryParse(listId, out _)))
+        return Results.BadRequest(new { error = "invalid_request" });
+
+    var householdKey = HouseholdContext.KeyOf(ctx.User);
+    if (householdKey is null) return NoHousehold(ctx.User);
+
+    var (_, resolvedListId, items) = await LoadListAsync(householdKey, listId, mealie, links, opt, ct);
+    var item = items.FirstOrDefault(i => i.FoodId == foodId);
+    if (item is null) return Results.NotFound();
+
+    var html = await SearchView.Create(new SearchViewModel(item, resolvedListId)).RenderAsync();
+    return Results.Content(html, "text/html");
+});
+
+// The Picnic search grid for one food, re-fetched on every keystroke (debounced
+// client-side) and once on the search view's initial load.
+api.MapGet("/items/{foodId}/search", async (string foodId, string? listId, string? term, MealieClient mealie, PicnicClient picnic, HouseholdLinkStore links, AppOptions opt, HttpContext ctx, CancellationToken ct) =>
+{
+    if (!Guid.TryParse(foodId, out _) || (listId is not null && !Guid.TryParse(listId, out _)))
+        return Results.BadRequest(new { error = "invalid_request" });
+
+    var householdKey = HouseholdContext.KeyOf(ctx.User);
+    if (householdKey is null) return NoHousehold(ctx.User);
+
+    var (_, resolvedListId, items) = await LoadListAsync(householdKey, listId, mealie, links, opt, ct);
+    var item = items.FirstOrDefault(i => i.FoodId == foodId);
+    if (item is null) return Results.NotFound();
+
+    var products = await picnic.SearchAsync(string.IsNullOrWhiteSpace(term) ? item.FoodName : term, ct);
+    var html = await HitsGrid.Create(new HitsModel(item, products, resolvedListId)).RenderAsync();
+    return Results.Content(html, "text/html");
+});
 
 // Organic claim and salt per 100 g, read from the product page (issue #6). Its own
 // endpoint because the search response cannot carry it: one page fetch per product
 // would turn a search into ninety upstream calls, so the UI asks per card, only
-// for cards that actually come into view, and both sides cache.
+// for cards that actually come into view, and both sides cache. Still JSON: it's
+// fetched by app.js's factsLoader, not swapped in as HTML by htmx.
 api.MapGet("/details/{productId}", async (string productId, PicnicClient picnic, CancellationToken ct) =>
 {
     if (!Regex.IsMatch(productId, "^[A-Za-z0-9_-]{1,32}$"))
@@ -485,60 +594,77 @@ api.MapGet("/image/{imageId}", async (string imageId, PicnicClient picnic, Cance
 
 // ----------------------------------------------------------------- mapping
 
-api.MapPost("/link", (LinkRequest? body, HouseholdLinkStore links, HttpContext ctx) =>
+// Triggered by a product card's hx-post; foodId/picnicUid/label/pack arrive as
+// ordinary form fields (see HitsGrid.cshtml -- label/pack are free-text product
+// names, read via data-* attributes and htmx's js: hx-vals rather than
+// interpolated into a hand-built JSON string, which a quote in a product name
+// would break).
+api.MapPost("/link", async (HttpContext ctx, MealieClient mealie, HouseholdLinkStore links, AppOptions opt, CancellationToken ct) =>
 {
-    if (body is null || !Guid.TryParse(body.FoodId, out _)
-        || string.IsNullOrWhiteSpace(body.PicnicUid)
-        || !Regex.IsMatch(body.PicnicUid, "^[A-Za-z0-9_-]{1,32}$"))
+    var listId = ctx.Request.Query["listId"].ToString();
+    var form = await ctx.Request.ReadFormAsync(ct);
+    var foodId = form["foodId"].ToString();
+    var picnicUid = form["picnicUid"].ToString();
+
+    if (!Guid.TryParse(foodId, out _) || string.IsNullOrWhiteSpace(picnicUid)
+        || !Regex.IsMatch(picnicUid, "^[A-Za-z0-9_-]{1,32}$"))
         return Results.BadRequest(new { error = "invalid_request" });
 
     var householdKey = HouseholdContext.KeyOf(ctx.User);
     if (householdKey is null) return NoHousehold(ctx.User);
 
     // label/pack stored so the basket can work out how many packs a weight needs.
-    links.Link(householdKey, body.FoodId, body.PicnicUid, body.Label, body.Pack);
-    return Results.Ok(new { ok = true });
+    links.Link(householdKey, foodId, picnicUid, form["label"].ToString(), form["pack"].ToString());
+    return await RenderListAsync(householdKey, listId, mealie, links, opt, ct);
 });
 
-api.MapPost("/exclude", (FoodRef? body, HouseholdLinkStore links, HttpContext ctx) =>
+api.MapPost("/exclude", async (HttpContext ctx, MealieClient mealie, HouseholdLinkStore links, AppOptions opt, CancellationToken ct) =>
 {
-    if (body is null || !Guid.TryParse(body.FoodId, out _))
+    var listId = ctx.Request.Query["listId"].ToString();
+    var form = await ctx.Request.ReadFormAsync(ct);
+    var foodId = form["foodId"].ToString();
+    if (!Guid.TryParse(foodId, out _))
         return Results.BadRequest(new { error = "invalid_request" });
 
     var householdKey = HouseholdContext.KeyOf(ctx.User);
     if (householdKey is null) return NoHousehold(ctx.User);
 
-    links.Exclude(householdKey, body.FoodId);
-    return Results.Ok(new { ok = true });
+    links.Exclude(householdKey, foodId);
+    return await RenderListAsync(householdKey, listId, mealie, links, opt, ct);
 });
 
 // Revert an exclusion: clear the flag so the item shows up as 'new' again.
-api.MapPost("/include", (FoodRef? body, HouseholdLinkStore links, HttpContext ctx) =>
+api.MapPost("/include", async (HttpContext ctx, MealieClient mealie, HouseholdLinkStore links, AppOptions opt, CancellationToken ct) =>
 {
-    if (body is null || !Guid.TryParse(body.FoodId, out _))
+    var listId = ctx.Request.Query["listId"].ToString();
+    var form = await ctx.Request.ReadFormAsync(ct);
+    var foodId = form["foodId"].ToString();
+    if (!Guid.TryParse(foodId, out _))
         return Results.BadRequest(new { error = "invalid_request" });
 
     var householdKey = HouseholdContext.KeyOf(ctx.User);
     if (householdKey is null) return NoHousehold(ctx.User);
 
-    links.Clear(householdKey, body.FoodId);
-    return Results.Ok(new { ok = true });
+    links.Clear(householdKey, foodId);
+    return await RenderListAsync(householdKey, listId, mealie, links, opt, ct);
 });
 
 // ----------------------------------------------------------------- basket
 
-api.MapPost("/basket", async (BasketRequest? body, MealieClient mealie, PicnicClient picnic,
-                              HouseholdLinkStore links, HttpContext ctx,
+api.MapPost("/basket", async (HttpContext ctx, MealieClient mealie, PicnicClient picnic,
+                              HouseholdLinkStore links, AppOptions opt,
                               ILogger<Program> log, CancellationToken ct) =>
 {
-    var listId = body?.ListId;
-    if (listId is not null && !Guid.TryParse(listId, out _))
+    var form = await ctx.Request.ReadFormAsync(ct);
+    var listId = form["listId"].ToString();
+    var checkOff = form["checkOff"].ToString() == "true";
+    if (!string.IsNullOrEmpty(listId) && !Guid.TryParse(listId, out _))
         return Results.BadRequest(new { error = "invalid_list_id" });
 
     var householdKey = HouseholdContext.KeyOf(ctx.User);
     if (householdKey is null) return NoHousehold(ctx.User);
 
-    var items = links.Merge(householdKey, await mealie.GetItemsAsync(listId, ct));
+    var (_, resolvedListId, items) = await LoadListAsync(householdKey, listId, mealie, links, opt, ct);
     var results = new List<CartResult>();
     var consecutiveFailures = 0;
     var aborted = false;
@@ -555,7 +681,7 @@ api.MapPost("/basket", async (BasketRequest? body, MealieClient mealie, PicnicCl
             consecutiveFailures = 0;
 
             var checkedOff = false;
-            if (body?.CheckOff == true)
+            if (checkOff)
             {
                 try
                 {
@@ -609,7 +735,17 @@ api.MapPost("/basket", async (BasketRequest? body, MealieClient mealie, PicnicCl
     }
 
     var skipped = items.Count(i => i.State == LinkState.New);
-    return Results.Ok(new { results, unmapped = skipped, aborted });
+    var logHtml = await BasketLog.Create(new BasketLogModel(results, skipped, aborted, checkOff)).RenderAsync();
+    if (!checkOff)
+        return Results.Content(logHtml, "text/html");
+
+    // checkOff can change item.Checked server-side (Mealie), so the list itself
+    // needs to move too -- an out-of-band swap updates #view in the same
+    // response the basket log arrives in, instead of a second round trip.
+    var (freshLists, _, freshItems) = await LoadListAsync(householdKey, resolvedListId, mealie, links, opt, ct);
+    var listHtml = await ListView.Create(new ListViewModel(freshLists, resolvedListId, freshItems)).RenderAsync();
+    var oob = listHtml.Replace("<div id=\"view\"", "<div id=\"view\" hx-swap-oob=\"true\"");
+    return Results.Content(logHtml + oob, "text/html");
 });
 
 api.MapGet("/cart", async (PicnicClient picnic, CancellationToken ct) =>
@@ -623,10 +759,6 @@ app.Run();
 // so this is TwoFactorChannel rather than Channel.
 internal record TwoFactorChannel(string? Channel);
 internal record Otp(string? Code);
-internal record FoodRef(string FoodId);
-internal record ListSelection(string ListId);
-internal record LinkRequest(string FoodId, string PicnicUid, string? Label, string? Pack);
-internal record BasketRequest(bool CheckOff, string? ListId);
 internal record LoginRequest(string? User, string? Password);
 
 /// <summary>Marker so WebApplicationFactory-based integration tests can host the app.</summary>
