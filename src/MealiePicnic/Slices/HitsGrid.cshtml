@@ -48,7 +48,7 @@ else
                 }
                 <div class="n">@p.Name</div>
                 <div class="p"><b>@p.PriceText</b> @p.UnitQuantity</div>
-                <div class="f" x-data="factsLoader('@p.Id')"></div>
+                <div class="f" x-data="factsLoader" data-product-id="@p.Id" x-html="html"></div>
             </button>
         }
     </div>
