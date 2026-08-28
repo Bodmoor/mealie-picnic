@@ -1,4 +1,4 @@
-namespace MealiePicnic;
+namespace MealiePicnic.Presentation;
 
 /// <summary>
 /// The whole UI, served as two strings. No build step, no npm, no framework.

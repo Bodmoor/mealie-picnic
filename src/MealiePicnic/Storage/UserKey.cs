@@ -2,7 +2,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace MealiePicnic;
+namespace MealiePicnic.Storage;
 
 /// <summary>
 /// Maps a signed-in principal to a filesystem-safe per-user storage key, used to

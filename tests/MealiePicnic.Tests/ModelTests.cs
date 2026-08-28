@@ -1,3 +1,5 @@
+using MealiePicnic.Clients;
+
 namespace MealiePicnic.Tests;
 
 public class ModelTests

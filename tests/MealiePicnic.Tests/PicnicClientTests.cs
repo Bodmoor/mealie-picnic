@@ -1,6 +1,8 @@
 using System.Net;
 using System.Security.Claims;
 using System.Text.Json.Nodes;
+using MealiePicnic.Clients;
+using MealiePicnic.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace MealiePicnic.Tests;

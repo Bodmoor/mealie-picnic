@@ -9,9 +9,9 @@ public class IconsTests
 {
     public static TheoryData<string, byte[], int> Icons => new()
     {
-        { "192", MealiePicnic.Icons.Png192, 192 },
-        { "512", MealiePicnic.Icons.Png512, 512 },
-        { "maskable-512", MealiePicnic.Icons.PngMaskable512, 512 },
+        { "192", Presentation.Icons.Png192, 192 },
+        { "512", Presentation.Icons.Png512, 512 },
+        { "maskable-512", Presentation.Icons.PngMaskable512, 512 },
     };
 
     [Theory]
@@ -41,7 +41,7 @@ public class IconsTests
     {
         // Served as image/svg+xml from /icons, so it has to parse as SVG and carry
         // the twelve stars of the EU mark -- a truncated file would render blank.
-        var svg = System.Text.Encoding.UTF8.GetString(MealiePicnic.Icons.EuOrganicSvg);
+        var svg = System.Text.Encoding.UTF8.GetString(Presentation.Icons.EuOrganicSvg);
 
         Assert.StartsWith("<svg", svg);
         Assert.EndsWith("</svg>", svg.Trim());
@@ -53,6 +53,6 @@ public class IconsTests
     {
         // Android tints the task switcher with theme_color; a mismatch against the
         // icon's Mealie orange looks like a rendering bug.
-        Assert.Contains("\"theme_color\": \"#E58325\"", MealiePicnic.Icons.Manifest);
+        Assert.Contains("\"theme_color\": \"#E58325\"", Presentation.Icons.Manifest);
     }
 }

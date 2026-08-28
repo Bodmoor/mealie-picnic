@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 
-namespace MealiePicnic;
+namespace MealiePicnic.Clients;
 
 /// <summary>
 /// Issue #6: show whether a product is organic, and how much salt it contains, so

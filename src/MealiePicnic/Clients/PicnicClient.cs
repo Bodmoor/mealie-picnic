@@ -3,10 +3,11 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
+using MealiePicnic.Storage;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
 
-namespace MealiePicnic;
+namespace MealiePicnic.Clients;
 
 /// <summary>
 /// Unofficial Picnic storefront API. Notes on the endpoints, since they are undocumented:
@@ -39,7 +40,7 @@ public sealed class PicnicClient(
     // signed-in identity -- OIDC or the /login/admin panic fallback -- gets its
     // own TokenStore slot. See UserKey and TokenStore for the storage layout.
     private string? UserKey =>
-        options.OidcEnabled ? MealiePicnic.UserKey.From(accessor.HttpContext?.User ?? new()) : null;
+        options.OidcEnabled ? Storage.UserKey.From(accessor.HttpContext?.User ?? new()) : null;
 
     public bool HasToken => tokens.Token(UserKey) is { Length: > 0 };
 

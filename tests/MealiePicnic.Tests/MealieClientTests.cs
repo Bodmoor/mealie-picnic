@@ -1,3 +1,4 @@
+using MealiePicnic.Clients;
 using System.Net;
 using System.Text.Json.Nodes;
 
@@ -10,15 +11,14 @@ public class MealieClientTests
                      { "id": "dddddddd-2222-2222-2222-222222222222", "name": "Andere lijst" } ] }
         """;
 
-    private static string Item(string id, string foodId, string name, object extras,
+    private static string Item(string id, string foodId, string name,
                                double quantity = 0, bool @checked = false) => $$"""
         {
           "id": "{{id}}", "shoppingListId": "dddddddd-1111-1111-1111-111111111111", "note": "", "display": "{{name}}",
           "checked": {{(@checked ? "true" : "false")}}, "position": 0, "quantity": {{quantity}},
           "labelId": "bbbbbbbb-1111-1111-1111-111111111111", "label": { "id": "bbbbbbbb-1111-1111-1111-111111111111", "name": "Zuivel" },
           "foodId": "{{foodId}}",
-          "food": { "id": "{{foodId}}", "name": "{{name}}", "description": "",
-                    "aliases": [], "extras": {{extras}} },
+          "food": { "id": "{{foodId}}", "name": "{{name}}", "description": "", "aliases": [] },
           "unitId": null, "unit": null, "isFood": null, "disableAmount": null
         }
         """;
@@ -47,41 +47,39 @@ public class MealieClientTests
     }
 
     [Fact]
-    public async Task Classifies_items_by_picnic_extras()
+    public async Task Items_start_unclassified_pending_the_household_merge()
     {
+        // Picnic link classification is household-scoped now (issue #17); the
+        // Mealie client itself no longer knows about picnic_* extras at all.
         var handler = new StubHandler()
             .OnJson("shopping/lists", Lists)
             .OnJson("shopping/items", $$"""
-                { "items": [
-                    {{Item("11111111-1111-1111-1111-111111111111", "aaaaaaaa-1111-1111-1111-111111111111", "melk", """{ "picnic_uid": "s1", "picnic": "true" }""")}},
-                    {{Item("22222222-2222-2222-2222-222222222222", "aaaaaaaa-2222-2222-2222-222222222222", "zout", """{ "picnic": "false" }""")}},
-                    {{Item("33333333-3333-3333-3333-333333333333", "aaaaaaaa-3333-3333-3333-333333333333", "wrap", "{}")}}
-                ] }
+                { "items": [ {{Item("11111111-1111-1111-1111-111111111111", "aaaaaaaa-1111-1111-1111-111111111111", "melk")}} ] }
                 """);
 
-        var items = await TestFactory.Mealie(handler).GetItemsAsync(null, default);
+        var item = Assert.Single(await TestFactory.Mealie(handler).GetItemsAsync(null, default));
 
-        Assert.Equal(LinkState.Linked, items.Single(i => i.FoodName == "melk").State);
-        Assert.Equal(LinkState.Excluded, items.Single(i => i.FoodName == "zout").State);
-        Assert.Equal(LinkState.New, items.Single(i => i.FoodName == "wrap").State);
+        Assert.Equal(LinkState.New, item.State);
+        Assert.Null(item.PicnicUid);
+        Assert.Null(item.PicnicLabel);
+        Assert.Null(item.PicnicPack);
     }
 
     [Fact]
-    public async Task Puts_new_items_first()
+    public async Task Orders_items_alphabetically_by_food_name()
     {
         var handler = new StubHandler()
             .OnJson("shopping/lists", Lists)
             .OnJson("shopping/items", $$"""
                 { "items": [
-                    {{Item("11111111-1111-1111-1111-111111111111", "aaaaaaaa-1111-1111-1111-111111111111", "aaa-linked", """{ "picnic_uid": "s1" }""")}},
-                    {{Item("22222222-2222-2222-2222-222222222222", "aaaaaaaa-2222-2222-2222-222222222222", "zzz-excluded", """{ "picnic": "false" }""")}},
-                    {{Item("33333333-3333-3333-3333-333333333333", "aaaaaaaa-3333-3333-3333-333333333333", "mmm-new", "{}")}}
+                    {{Item("11111111-1111-1111-1111-111111111111", "aaaaaaaa-1111-1111-1111-111111111111", "zout")}},
+                    {{Item("22222222-2222-2222-2222-222222222222", "aaaaaaaa-2222-2222-2222-222222222222", "appel")}}
                 ] }
                 """);
 
         var items = await TestFactory.Mealie(handler).GetItemsAsync(null, default);
 
-        Assert.Equal(new[] { "mmm-new", "aaa-linked", "zzz-excluded" }, items.Select(i => i.FoodName));
+        Assert.Equal(new[] { "appel", "zout" }, items.Select(i => i.FoodName));
     }
 
     [Fact]
@@ -98,36 +96,6 @@ public class MealieClientTests
         var items = await TestFactory.Mealie(handler).GetItemsAsync(null, default);
 
         Assert.Empty(items);   // nothing to map a Picnic product against
-    }
-
-    [Fact]
-    public async Task SetFoodExtras_merges_and_preserves_aliases()
-    {
-        // Regression: Mealie has no PATCH and PUT replaces the object, so omitting
-        // aliases from the body silently destroys them.
-        var handler = new StubHandler()
-            .OnJson("foods/", """
-                {
-                  "id": "aaaaaaaa-1111-1111-1111-111111111111", "name": "wrap", "pluralName": "wraps", "description": "",
-                  "aliases": [ { "name": "witte tortilla" } ],
-                  "label": { "id": "bbbbbbbb-9999-9999-9999-999999999999", "name": "Brood" },
-                  "extras": { "keep_me": "yes" }
-                }
-                """);
-
-        var merged = await TestFactory.Mealie(handler)
-            .SetFoodExtrasAsync("aaaaaaaa-1111-1111-1111-111111111111", new Dictionary<string, string> { ["picnic_uid"] = "s1005080" }, default);
-
-        Assert.Equal("yes", merged["keep_me"]!.GetValue<string>());
-        Assert.Equal("s1005080", merged["picnic_uid"]!.GetValue<string>());
-
-        var put = handler.Sent.Single(s => s.Method == HttpMethod.Put);
-        var body = JsonNode.Parse(put.Body)!;
-
-        Assert.Equal("witte tortilla", body["aliases"]![0]!["name"]!.GetValue<string>());
-        Assert.Equal("wraps", body["pluralName"]!.GetValue<string>());
-        Assert.Equal("bbbbbbbb-9999-9999-9999-999999999999", body["labelId"]!.GetValue<string>());
-        Assert.Equal("yes", body["extras"]!["keep_me"]!.GetValue<string>());
     }
 
     [Fact]
@@ -193,8 +161,8 @@ public class MealieClientTests
             .OnJson("shopping/lists", Lists)
             .OnJson("shopping/items", $$"""
                 { "items": [
-                    {{Item("11111111-1111-1111-1111-111111111111", "aaaaaaaa-1111-1111-1111-111111111111", "melk", """{ "picnic_uid": "s1" }""", @checked: true)}},
-                    {{Item("22222222-2222-2222-2222-222222222222", "aaaaaaaa-2222-2222-2222-222222222222", "wrap", """{ "picnic_uid": "s2" }""")}}
+                    {{Item("11111111-1111-1111-1111-111111111111", "aaaaaaaa-1111-1111-1111-111111111111", "melk", @checked: true)}},
+                    {{Item("22222222-2222-2222-2222-222222222222", "aaaaaaaa-2222-2222-2222-222222222222", "wrap")}}
                 ] }
                 """);
 
@@ -203,22 +171,6 @@ public class MealieClientTests
         Assert.Equal(2, items.Count);
         Assert.True(items.Single(i => i.FoodName == "melk").Checked);
         Assert.False(items.Single(i => i.FoodName == "wrap").Checked);
-    }
-
-    [Theory]
-    [InlineData("../../app/about")]
-    [InlineData("not-a-guid")]
-    [InlineData("")]
-    public async Task Rejects_non_guid_food_ids_before_any_request(string foodId)
-    {
-        // B2: these paths carry the MEALIE_TOKEN, so '../..' would be full API
-        // access with the app's credentials. Nothing must leave the process.
-        var handler = new StubHandler();
-
-        await Assert.ThrowsAsync<ArgumentException>(() => TestFactory.Mealie(handler)
-            .SetFoodExtrasAsync(foodId, new Dictionary<string, string>(), default));
-
-        Assert.Empty(handler.Sent);
     }
 
     [Theory]
@@ -263,16 +215,13 @@ public class MealieClientTests
                     "labelId": null, "label": null,
                     "foodId": "aaaaaaaa-1111-1111-1111-111111111111",
                     "food": { "id": "aaaaaaaa-1111-1111-1111-111111111111", "name": "bloem",
-                              "description": "", "aliases": [],
-                              "extras": { "picnic_uid": "s1", "picnic_pack": "1 kg" } }
+                              "description": "", "aliases": [] }
                 } ] }
                 """);
 
         var item = Assert.Single(await TestFactory.Mealie(handler).GetItemsAsync(null, default));
 
         Assert.Equal("gram", item.Unit);
-        Assert.Equal("1 kg", item.PicnicPack);
-        Assert.Equal(1, item.Amount);        // not 500
     }
 
     [Fact]
@@ -289,14 +238,67 @@ public class MealieClientTests
                     "unit": { "id": "cccccccc-2222-2222-2222-222222222222", "abbreviation": "kg" },
                     "foodId": "aaaaaaaa-2222-2222-2222-222222222222",
                     "food": { "id": "aaaaaaaa-2222-2222-2222-222222222222", "name": "aardappel",
-                              "description": "", "aliases": [],
-                              "extras": { "picnic_uid": "s2", "picnic_pack": "1 kg" } }
+                              "description": "", "aliases": [] }
                 } ] }
                 """);
 
         var item = Assert.Single(await TestFactory.Mealie(handler).GetItemsAsync(null, default));
 
         Assert.Equal("kg", item.Unit);
-        Assert.Equal(2, item.Amount);        // 2 kg from 1 kg bags
+    }
+
+    // ------------------------------------------------------------ household lookup
+
+    private static string AdminUser(string email, string householdId) => $$"""
+        { "id": "cccccccc-0000-0000-0000-000000000000", "email": "{{email}}", "householdId": "{{householdId}}" }
+        """;
+
+    [Fact]
+    public async Task Finds_the_household_id_for_a_matching_email()
+    {
+        var householdId = "eeeeeeee-1111-1111-1111-111111111111";
+        var handler = new StubHandler().OnJson("admin/users", $$"""
+            { "items": [ {{AdminUser("someone.else@example.com", "eeeeeeee-9999-9999-9999-999999999999")}},
+                        {{AdminUser("alice@example.com", householdId)}} ] }
+            """);
+
+        var found = await TestFactory.Mealie(handler).FindHouseholdIdByEmailAsync("alice@example.com", default);
+
+        Assert.Equal(Guid.Parse(householdId), found);
+    }
+
+    [Fact]
+    public async Task Household_lookup_is_case_insensitive_on_email()
+    {
+        var householdId = "eeeeeeee-1111-1111-1111-111111111111";
+        var handler = new StubHandler().OnJson("admin/users", $$"""
+            { "items": [ {{AdminUser("Alice@Example.com", householdId)}} ] }
+            """);
+
+        var found = await TestFactory.Mealie(handler).FindHouseholdIdByEmailAsync("alice@example.com", default);
+
+        Assert.Equal(Guid.Parse(householdId), found);
+    }
+
+    [Fact]
+    public async Task Household_lookup_returns_null_when_email_not_found()
+    {
+        var handler = new StubHandler().OnJson("admin/users", """{ "items": [] }""");
+
+        var found = await TestFactory.Mealie(handler).FindHouseholdIdByEmailAsync("nobody@example.com", default);
+
+        Assert.Null(found);
+    }
+
+    [Fact]
+    public async Task Household_lookup_surfaces_a_403_from_a_non_admin_token()
+    {
+        var handler = new StubHandler().OnJson("admin/users",
+            """{"detail":"Not authenticated"}""", HttpStatusCode.Forbidden);
+
+        var ex = await Assert.ThrowsAsync<HttpRequestException>(
+            () => TestFactory.Mealie(handler).FindHouseholdIdByEmailAsync("alice@example.com", default));
+
+        Assert.Contains("403", ex.Message);
     }
 }

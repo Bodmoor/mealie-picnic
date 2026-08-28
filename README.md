@@ -4,18 +4,24 @@
 
 Links Mealie shopping list items to Picnic products, and fills the Picnic basket in one click.
 
-The mapping lives on the Mealie **food** (not the recipe, not the list item), so it is
-reused by every recipe that uses that ingredient:
+The mapping is keyed on the Mealie **food** (not the recipe, not the list item), so it
+is reused by every recipe that uses that ingredient — but scoped per **huishouden**
+(Mealie household): each household maintains its own Picnic link for the same food,
+independent of the others (issue #17). It is stored in this app's own data, one JSON
+file per household under `DATA_DIR/households/{key}/links.json`, not on the Mealie food
+itself — Mealie foods are group-scoped, so every household would otherwise see the same
+link. Which household a signed-in user belongs to is resolved once at login, via the
+OIDC email claim looked up against Mealie's admin API; see `MEALIE_TOKEN` below.
 
-| extras key     | meaning                                          |
-| -------------- | ------------------------------------------------ |
-| `picnic_uid`   | Picnic selling-unit id, e.g. `s1005080`          |
-| `picnic`       | `"true"` linked · `"false"` never buy at Picnic   |
-| `picnic_label` | product name at time of linking, for diagnostics |
-| `picnic_pack`  | Picnic's pack size at linking, e.g. `1 kg` or `6 stuks`   |
+| field         | meaning                                          |
+| ------------- | ------------------------------------------------ |
+| `picnicUid`   | Picnic selling-unit id, e.g. `s1005080`          |
+| `label`       | product name at time of linking, for diagnostics |
+| `pack`        | Picnic's pack size at linking, e.g. `1 kg` or `6 stuks` |
+| `excluded`    | never buy this food at Picnic                    |
 
-Items with no picnic extras at all are shown first as **nieuw**. Items with
-`picnic == "false"` are hidden behind a toggle, where the setting can be reverted.
+Foods with no link at all for the current household are shown first as **nieuw**.
+Excluded foods are hidden behind a toggle, where the setting can be reverted.
 
 ## Run
 
@@ -85,7 +91,7 @@ All via environment variables.
 | `OIDC_CLIENT_ID`       | no*      | —              | *required once `OIDC_AUTHORITY` is set     |
 | `OIDC_CLIENT_SECRET`   | no*      | —              | *required once `OIDC_AUTHORITY` is set; confidential client |
 | `MEALIE_URL`           | yes      | —              | e.g. `https://mealie.local`               |
-| `MEALIE_TOKEN`         | yes      | —              | Mealie → Profile → API Tokens; user secret locally |
+| `MEALIE_TOKEN`         | yes      | —              | Mealie → Profile → API Tokens; **must be a superuser/admin account** once `OIDC_AUTHORITY` is set — it also calls `/api/admin/users` to resolve a signed-in email to a household; user secret locally |
 | `MEALIE_LIST`          | no       | `Boodschappen` | *default* list; the UI has a picker and remembers your choice |
 | `PICNIC_USER`          | no*      | —              | *needed until a token is cached           |
 | `PICNIC_PASSWORD`      | no*      | —              |                                           |
@@ -113,9 +119,15 @@ xUnit, no mocking framework. Both APIs are faked with a `StubHandler` that route
 URI substring and records every request, so the tests assert on the exact JSON bodies
 sent to Mealie — which is where the sharp edges are:
 
-* `MealieClientTests` — item classification by picnic extras, `New` sorted first,
-  free-text notes skipped, and the regression that matters: `SetFoodExtras` must echo
-  `aliases` back or a PUT destroys them.
+* `MealieClientTests` — items load unclassified (classification is household-scoped
+  now), free-text notes skipped, and the household lookup against `/api/admin/users`
+  matches by email case-insensitively and surfaces a 403 from a non-admin token.
+* `HouseholdLinkStoreTests` — link/exclude/clear classify a food correctly for one
+  household without leaking into another's, `New` sorted first, and the merged pack
+  size still feeds the basket's amount calculation (issue #5's fix, now downstream of
+  the household merge).
+* `HouseholdKeyTests` — the household-id-to-storage-key hash is stable and
+  collision-free between households.
 * `PicnicClientTests` — selling units collected from the layout tree in relevance order
   and deduplicated, 403 mapped to `PicnicAuthException`, bad credentials returned as
   HTTP 200 with an error body still treated as failure, and the refreshed
@@ -155,14 +167,6 @@ POST /cart/add_product    {product_id, count}
 
 `x-picnic-did` must stay identical across calls — 2FA verification is bound to it.
 
-### Two Mealie gotchas baked in
-
-* There is **no PATCH** on `/api/foods/{id}`. PUT replaces the whole object, so any
-  omitted field is destroyed — `aliases` in particular. The client reads the food,
-  merges extras, and echoes everything back.
-* Food `extras` are API-only; Mealie's UI has no editor for them (only *recipe* extras
-  have a UI panel, which is the wrong level and isn't readable per ingredient).
-
 ## Caveats
 
 * Everything Picnic-side is unofficial and can break when they change their app.
@@ -176,10 +180,10 @@ POST /cart/add_product    {product_id, count}
   Picnic renames those blocks, both facts go quiet rather than wrong, and a warning is
   logged.
 * Quantities: a Mealie line's `quantity` only means "how many to buy" when the unit is
-  countable (`stuks`, or no unit). For mass and volume the app buys one pack, unless
-  `picnic_pack` is known and smaller than needed — 2 kg against 1 kg bags is two. Any
-  line is capped at `Quantities.MaxPerItem` so a mis-parsed unit costs one basket slot
-  rather than fifty.
+  countable (`stuks`, or no unit). For mass and volume the app buys one pack, unless the
+  household's stored pack size is known and smaller than needed — 2 kg against 1 kg bags
+  is two. Any line is capped at `Quantities.MaxPerItem` so a mis-parsed unit costs one
+  basket slot rather than fifty.
 * A line is only ticked off in Mealie after the product is *verified* present in the
   Picnic cart. Picnic answers some refusals with HTTP 200 and an error body, so a 2xx
   is not evidence of success — taking it as such used to tick the item off with nothing
@@ -198,3 +202,13 @@ POST /cart/add_product    {product_id, count}
   beyond that, a TLS-terminating reverse proxy is required, with `COOKIE_SECURE=true`
   and `TRUST_PROXY=true` set — otherwise the session cookie and any password travel
   the network in cleartext.
+* Household resolution (issue #17) happens once, at sign-in, and is cached as a claim
+  on the session cookie — not looked up again until the next login. If the signed-in
+  email is not linked to any Mealie household, sign-in still succeeds, but every
+  mapping endpoint (`/api/list`, `/api/link`, `/api/exclude`, `/api/include`,
+  `/api/basket`) answers `422` naming the email, until an admin links it in Mealie.
+  Without `OIDC_AUTHORITY` set, there is no email to resolve at all, so every session
+  (including the `/login/admin` break-glass one) shares one fixed pseudo-household
+  (`local`) — the same single-household behaviour as before this feature existed.
+  There is no migration from the old food-extras links: existing links must be
+  re-created per household after upgrading.

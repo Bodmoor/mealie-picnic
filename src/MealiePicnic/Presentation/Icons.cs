@@ -1,6 +1,6 @@
 using System.Reflection;
 
-namespace MealiePicnic;
+namespace MealiePicnic.Presentation;
 
 /// <summary>
 /// PWA assets. The icons live as real PNGs in <c>assets/</c> and are compiled in as

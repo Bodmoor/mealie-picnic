@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 
-namespace MealiePicnic;
+namespace MealiePicnic.Clients;
 
 public enum Dimension
 {

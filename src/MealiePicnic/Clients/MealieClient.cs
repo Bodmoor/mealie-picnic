@@ -1,21 +1,16 @@
+using MealiePicnic.Storage;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace MealiePicnic;
+namespace MealiePicnic.Clients;
 
 /// <summary>
 /// Talks to a self-hosted Mealie instance. Only the handful of endpoints we need.
 /// </summary>
-public sealed class MealieClient(HttpClient http, AppOptions options, ILogger<MealieClient> log)
+public sealed class MealieClient(HttpClient http, AppOptions options)
 {
-    public const string ExtraUid = "picnic_uid";
-    public const string ExtraFlag = "picnic";
-    public const string ExtraLabel = "picnic_label";
-    /// <summary>Picnic's unit_quantity at link time, e.g. "1 kg" or "6 stuks".</summary>
-    public const string ExtraPack = "picnic_pack";
-
     /// <summary>
     /// All Mealie ids interpolated into paths or query strings are UUIDs. Enforcing
     /// that here (not only at the endpoints) means a '../..' or '&perPage=1' can
@@ -71,10 +66,12 @@ public sealed class MealieClient(HttpClient http, AppOptions options, ILogger<Me
     }
 
     /// <summary>
-    /// Items on a list, classified by their picnic extras. Checked items are
-    /// included and flagged via <see cref="ShoppingItem.Checked"/>; the basket
-    /// skips them and the UI keeps them in a collapsed section.
-    /// Pass a listId to override the configured default (MEALIE_LIST).
+    /// Items on a list, with no Picnic link classification yet -- that is
+    /// household-scoped now (issue #17) and applied afterwards by
+    /// <see cref="HouseholdLinkStore.Merge"/>. Checked items are included and
+    /// flagged via <see cref="ShoppingItem.Checked"/>; the basket skips them and
+    /// the UI keeps them in a collapsed section. Pass a listId to override the
+    /// configured default (MEALIE_LIST).
     /// </summary>
     public async Task<List<ShoppingItem>> GetItemsAsync(string? listId, CancellationToken ct)
     {
@@ -95,17 +92,6 @@ public sealed class MealieClient(HttpClient http, AppOptions options, ILogger<Me
             // Free-text notes have no linked food, so there is nothing to map against.
             if (food is null) continue;
 
-
-            var extras = food["extras"] as JsonObject;
-            var uid = extras?[ExtraUid]?.GetValue<string>();
-            var flag = extras?[ExtraFlag]?.ToString();
-
-            var state = string.Equals(flag, "false", StringComparison.OrdinalIgnoreCase)
-                ? LinkState.Excluded
-                : !string.IsNullOrWhiteSpace(uid)
-                    ? LinkState.Linked
-                    : LinkState.New;
-
             result.Add(new ShoppingItem(
                 ItemId: node["id"]!.GetValue<string>(),
                 FoodId: food["id"]!.GetValue<string>(),
@@ -118,55 +104,36 @@ public sealed class MealieClient(HttpClient http, AppOptions options, ILogger<Me
                       ?? "",
                 Label: node["label"]?["name"]?.GetValue<string>() ?? "",
                 Checked: node["checked"]?.GetValue<bool>() ?? false,
-                State: state,
-                PicnicUid: uid,
-                PicnicLabel: extras?[ExtraLabel]?.GetValue<string>(),
-                PicnicPack: extras?[ExtraPack]?.GetValue<string>()));
+                State: LinkState.New,
+                PicnicUid: null,
+                PicnicLabel: null,
+                PicnicPack: null));
         }
 
-        // 'New' first: those are the ones needing a decision.
-        return result
-            .OrderBy(i => i.State switch { LinkState.New => 0, LinkState.Linked => 1, _ => 2 })
-            .ThenBy(i => i.FoodName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        return result.OrderBy(i => i.FoodName, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     /// <summary>
-    /// Merge keys into a food's extras.
-    /// Mealie has no PATCH on /api/foods/{id} and PUT REPLACES the whole object,
-    /// so every field we want to keep must be echoed back -- notably 'aliases',
-    /// which are silently destroyed otherwise.
+    /// Admin-only: look up the Mealie household a user belongs to by their OIDC
+    /// email claim (issue #17). Requires MEALIE_TOKEN to belong to a Mealie
+    /// superuser account -- a non-admin token gets a 403 from this endpoint.
+    /// Returns null if no Mealie user has this email, which callers must treat
+    /// as "household unresolved", not an error.
     /// </summary>
-    public async Task<JsonObject> SetFoodExtrasAsync(
-        string foodId, IReadOnlyDictionary<string, string> values, CancellationToken ct)
+    public async Task<Guid?> FindHouseholdIdByEmailAsync(string email, CancellationToken ct)
     {
-        foodId = RequireGuid(foodId, nameof(foodId));
-        var food = await SendAsync(Request(HttpMethod.Get, $"foods/{foodId}"), ct);
+        var json = await SendAsync(Request(HttpMethod.Get, "admin/users?perPage=-1"), ct);
 
-        var extras = food["extras"] as JsonObject ?? new JsonObject();
-        var merged = new JsonObject();
-        foreach (var pair in extras)
-            merged[pair.Key] = pair.Value?.DeepClone();
-        foreach (var (key, value) in values)
-            merged[key] = value;
-
-        var body = new JsonObject
+        foreach (var user in json["items"]?.AsArray() ?? new JsonArray())
         {
-            ["id"] = foodId,
-            ["name"] = food["name"]?.DeepClone(),
-            ["pluralName"] = food["pluralName"]?.DeepClone(),
-            ["description"] = food["description"]?.DeepClone() ?? "",
-            ["labelId"] = food["label"]?["id"]?.DeepClone() ?? food["labelId"]?.DeepClone(),
-            ["aliases"] = food["aliases"]?.DeepClone() ?? new JsonArray(),
-            ["extras"] = merged.DeepClone(),
-        };
+            if (user is null) continue;
+            if (!string.Equals(user["email"]?.GetValue<string>(), email, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (user["householdId"]?.GetValue<string>() is { Length: > 0 } id && Guid.TryParse(id, out var parsed))
+                return parsed;
+        }
 
-        var request = Request(HttpMethod.Put, $"foods/{foodId}");
-        request.Content = JsonContent.Create(body);
-        await SendAsync(request, ct);
-
-        log.LogInformation("Food {FoodId} extras updated: {Keys}", foodId, string.Join(",", values.Keys));
-        return merged;
+        return null;
     }
 
     /// <summary>Tick an item off the Mealie list. Same read-modify-write caveat as foods.</summary>

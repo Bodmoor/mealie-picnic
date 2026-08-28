@@ -1,4 +1,4 @@
-namespace MealiePicnic;
+namespace MealiePicnic.Storage;
 
 /// <summary>
 /// Persists the Picnic auth token on the mounted volume so 2FA is a rare chore
