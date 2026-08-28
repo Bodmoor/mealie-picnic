@@ -284,7 +284,14 @@ app.MapGet("/assets/{name}", (string name, HttpContext ctx) =>
     };
     if (content is null) return Results.NotFound();
 
-    ctx.Response.Headers.CacheControl = week;
+    // Html.AppPage links each of these with a ?v={content hash} (Vendor.cs), so
+    // this exact URL's content genuinely never changes -- a deploy that edits
+    // app.js changes the URL instead. "immutable" is then correct, not just
+    // long-lived: browsers skip the revalidation request entirely, even on a
+    // manual reload (issue #33 -- the previous fixed, un-versioned URL was still
+    // serving a week-old app.js from cache well after the server-side bug was
+    // already fixed).
+    ctx.Response.Headers.CacheControl = week + ", immutable";
     return Results.Content(content, "text/javascript");
 });
 

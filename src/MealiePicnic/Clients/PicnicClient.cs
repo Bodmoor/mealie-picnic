@@ -279,12 +279,10 @@ public sealed class PicnicClient(
 
         var claims = new List<string>();
         var found = false;
-        var foundOwnBlocks = new List<string>();
         foreach (var id in own)
         {
             if (FindById(page, id) is not { } node) continue;
             found = true;
-            foundOwnBlocks.Add(id);
             Markdowns(node, claims);
         }
 
@@ -293,15 +291,11 @@ public sealed class PicnicClient(
         // ("biologische tarwebloem" in an ingredient list means what it says).
         var nutrition = new List<string>();
         var accordionAll = new List<string>();
-        var sectionTitles = new List<string>();
-        var accordionFound = false;
         if (FindById(page, "accordion-list") is { } accordion)
         {
             found = true;
-            accordionFound = true;
             foreach (var (title, body) in Sections(accordion))
             {
-                sectionTitles.Add(title);
                 accordionAll.AddRange(body);
                 if (title.Contains("voedingswaarde", StringComparison.OrdinalIgnoreCase) ||
                     title.Contains("nutrition", StringComparison.OrdinalIgnoreCase))
@@ -327,24 +321,9 @@ public sealed class PicnicClient(
         // word, immediately followed by a per-100g-shaped amount) is specific
         // enough that scanning ingredients/allergen text alongside it is safe.
         var salt = ProductFacts.ParseSalt(nutrition) ?? ProductFacts.ParseSalt(accordionAll);
-        var organic = ProductFacts.IsOrganic(claims);
-
-        // Temporary diagnostic for issue #33 (salt/organic still not showing):
-        // the extraction logic here is unchanged since it was first written
-        // (issue #6), so the working theory is Picnic reshaped the page. This
-        // logs exactly what was matched -- which "own" blocks, whether the
-        // accordion was found at all, and its section titles verbatim -- so the
-        // next fix can be made from real data instead of another guess. Remove
-        // once #33 is confirmed fixed.
-        log.LogInformation(
-            "Details for {Id}: organic={Organic} saltGrams={SaltGrams} ownBlocks=[{OwnBlocks}] " +
-            "accordionFound={AccordionFound} accordionSections=[{Sections}]",
-            productId, organic, salt?.Grams, string.Join(" | ", foundOwnBlocks),
-            accordionFound, string.Join(" | ", sectionTitles));
-
         return new PicnicDetails(
             Id: productId,
-            Organic: organic,
+            Organic: ProductFacts.IsOrganic(claims),
             SaltGramsPer100: salt?.Grams,
             SaltText: salt?.Text);
     }
