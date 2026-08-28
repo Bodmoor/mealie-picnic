@@ -41,9 +41,11 @@ public class AuthorizationTests
     public static TheoryData<string> ProtectedGets => new()
     {
         "/",
+        "/assets/htmx.min.js",
         "/api/lists",
         "/api/list",
-        "/api/search?term=melk",
+        "/api/items/00000000-0000-0000-0000-000000000001",
+        "/api/items/00000000-0000-0000-0000-000000000001/search",
         "/api/details/s1005080",
         "/api/image/abc",
         "/api/cart",
