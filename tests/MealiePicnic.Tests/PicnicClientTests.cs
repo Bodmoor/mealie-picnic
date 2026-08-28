@@ -362,6 +362,37 @@ public class PicnicClientTests
             .AddToCartAsync("s1005080", 1, default);
     }
 
+    // ---------------------------------------------------------------- issue #27
+
+    [Fact]
+    public async Task AddProducts_sends_one_request_with_a_quantity_per_product()
+    {
+        var handler = new StubHandler().OnJson("cart/products/add", CartWith);
+
+        await TestFactory.Picnic(handler, tokens: Tokens("tok"))
+            .AddProductsToCartAsync(new Dictionary<string, int> { ["s1005080"] = 2, ["s1161238"] = 1 }, default);
+
+        Assert.Single(handler.Sent);
+        var body = JsonNode.Parse(handler.Sent.Single().Body)!;
+        Assert.Equal(2, body["s1005080"]!.GetValue<int>());
+        Assert.Equal(1, body["s1161238"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task AddProducts_returns_the_updated_cart_without_throwing_on_a_partial_refusal()
+    {
+        // Unlike the single-item add, a batch call must not throw just because
+        // Picnic answers with something other than a full success -- the caller
+        // decides per product whether it landed, via CartHasProduct.
+        var handler = new StubHandler().OnJson("cart/products/add", CartWith);
+
+        var cart = await TestFactory.Picnic(handler, tokens: Tokens("tok"))
+            .AddProductsToCartAsync(new Dictionary<string, int> { ["s1005080"] = 1, ["s9999999"] = 1 }, default);
+
+        Assert.True(PicnicClient.CartHasProduct(cart!, "s1005080"));
+        Assert.False(PicnicClient.CartHasProduct(cart!, "s9999999"));
+    }
+
     // ---------------------------------------------------------------- issue #6
 
     /// <summary>
