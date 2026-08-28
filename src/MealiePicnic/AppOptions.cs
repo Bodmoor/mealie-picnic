@@ -16,8 +16,11 @@ public sealed class AppOptions
     /// configured, where it still works as a break-glass fallback at /login/admin.</summary>
     public string AppPassword { get; init; } = "";
 
-    /// <summary>Authentik (or any OIDC provider) issuer URL. Presence of this is
-    /// what turns OIDC login on; leave unset to keep the single-password login.</summary>
+    /// <summary>
+    /// Authentik (or any OIDC provider) issuer URL, for this app's own dedicated
+    /// application (BOODSCHAPPEN_OIDC_AUTHORITY) -- not Mealie's. Presence of this
+    /// is what turns OIDC login on; leave unset to keep the single-password login.
+    /// </summary>
     public string OidcAuthority { get; init; } = "";
 
     public string OidcClientId { get; init; } = "";
@@ -79,9 +82,9 @@ public sealed class AppOptions
             PicnicCountry = Get("PICNIC_COUNTRY", "NL"),
             PicnicApiVersion = Get("PICNIC_API_VERSION", "15"),
             AppPassword = Get("APP_PASSWORD"),
-            OidcAuthority = Get("OIDC_AUTHORITY"),
-            OidcClientId = Get("OIDC_CLIENT_ID"),
-            OidcClientSecret = Get("OIDC_CLIENT_SECRET"),
+            OidcAuthority = Get("BOODSCHAPPEN_OIDC_AUTHORITY"),
+            OidcClientId = Get("BOODSCHAPPEN_OIDC_CLIENT_ID"),
+            OidcClientSecret = Get("BOODSCHAPPEN_OIDC_CLIENT_SECRET"),
             DataDir = Get("DATA_DIR", "/data"),
             SearchCacheMinutes = int.TryParse(Get("SEARCH_CACHE_MINUTES"), out var m) ? m : 30,
             CookieSecure = bool.TryParse(Get("COOKIE_SECURE"), out var cs) && cs,
@@ -97,8 +100,8 @@ public sealed class AppOptions
         if (!options.OidcEnabled && options.AppPassword.Length == 0) missing.Add("APP_PASSWORD");
         if (options.OidcEnabled)
         {
-            if (options.OidcClientId.Length == 0) missing.Add("OIDC_CLIENT_ID");
-            if (options.OidcClientSecret.Length == 0) missing.Add("OIDC_CLIENT_SECRET");
+            if (options.OidcClientId.Length == 0) missing.Add("BOODSCHAPPEN_OIDC_CLIENT_ID");
+            if (options.OidcClientSecret.Length == 0) missing.Add("BOODSCHAPPEN_OIDC_CLIENT_SECRET");
         }
         if (missing.Count > 0)
             throw new InvalidOperationException(

@@ -1,4 +1,4 @@
-namespace MealiePicnic;
+namespace MealiePicnic.Clients;
 
 /// <summary>A Picnic selling unit as shown in search results.</summary>
 public sealed record PicnicProduct(
@@ -30,14 +30,14 @@ public sealed record PicnicDetails(
     double? SaltGramsPer100,
     string? SaltText);
 
-/// <summary>How a shopping list item relates to Picnic.</summary>
+/// <summary>How a shopping list item relates to Picnic, for the current household.</summary>
 public enum LinkState
 {
-    /// <summary>No picnic extras at all -- needs attention, shown first.</summary>
+    /// <summary>No household link at all -- needs attention, shown first.</summary>
     New,
-    /// <summary>Has picnic_uid, ready for the basket.</summary>
+    /// <summary>Linked to a Picnic product, ready for the basket.</summary>
     Linked,
-    /// <summary>picnic == "false": deliberately not bought at Picnic.</summary>
+    /// <summary>Deliberately not bought at Picnic.</summary>
     Excluded
 }
 

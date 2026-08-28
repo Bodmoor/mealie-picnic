@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using MealiePicnic.Clients;
+using MealiePicnic.Storage;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
@@ -17,14 +19,14 @@ internal static class TestFactory
                 ["MEALIE_LIST"] = "Boodschappen",
                 ["APP_PASSWORD"] = "pw",
                 ["DATA_DIR"] = dataDir ?? Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")),
-                ["OIDC_AUTHORITY"] = oidcEnabled ? "https://authentik.test/application/o/mealie/" : null,
-                ["OIDC_CLIENT_ID"] = oidcEnabled ? "test-client" : null,
-                ["OIDC_CLIENT_SECRET"] = oidcEnabled ? "test-secret" : null,
+                ["BOODSCHAPPEN_OIDC_AUTHORITY"] = oidcEnabled ? "https://authentik.test/application/o/boodschappen/" : null,
+                ["BOODSCHAPPEN_OIDC_CLIENT_ID"] = oidcEnabled ? "test-client" : null,
+                ["BOODSCHAPPEN_OIDC_CLIENT_SECRET"] = oidcEnabled ? "test-secret" : null,
             })
             .Build());
 
     public static MealieClient Mealie(StubHandler handler, AppOptions? options = null) =>
-        new(new HttpClient(handler), options ?? Options(), NullLogger<MealieClient>.Instance);
+        new(new HttpClient(handler), options ?? Options());
 
     public static PicnicClient Picnic(
         StubHandler handler, AppOptions? options = null, TokenStore? tokens = null, ClaimsPrincipal? user = null)

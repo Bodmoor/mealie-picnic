@@ -23,9 +23,9 @@ public class OidcAuthorizationTests
             builder.UseSetting("MEALIE_URL", "https://mealie.test");
             builder.UseSetting("MEALIE_TOKEN", "test-token");
             if (appPassword) builder.UseSetting("APP_PASSWORD", Password);
-            builder.UseSetting("OIDC_AUTHORITY", "https://authentik.test/application/o/mealie/");
-            builder.UseSetting("OIDC_CLIENT_ID", "mealie-picnic");
-            builder.UseSetting("OIDC_CLIENT_SECRET", "secret");
+            builder.UseSetting("BOODSCHAPPEN_OIDC_AUTHORITY", "https://authentik.test/application/o/boodschappen/");
+            builder.UseSetting("BOODSCHAPPEN_OIDC_CLIENT_ID", "boodschappen");
+            builder.UseSetting("BOODSCHAPPEN_OIDC_CLIENT_SECRET", "secret");
             builder.UseSetting("DATA_DIR",
                 Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
 
@@ -37,7 +37,7 @@ public class OidcAuthorizationTests
                     {
                         AuthorizationEndpoint = "https://authentik.test/application/o/authorize/",
                         TokenEndpoint = "https://authentik.test/application/o/token/",
-                        Issuer = "https://authentik.test/application/o/mealie/",
+                        Issuer = "https://authentik.test/application/o/boodschappen/",
                     }));
         });
 

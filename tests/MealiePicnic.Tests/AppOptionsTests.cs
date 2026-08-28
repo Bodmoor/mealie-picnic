@@ -98,13 +98,13 @@ public class AppOptionsTests
     public void Oidc_requires_client_id_and_secret_once_authority_is_set()
     {
         var settings = Required
-            .Append(("OIDC_AUTHORITY", "https://authentik.test/application/o/mealie/"))
+            .Append(("BOODSCHAPPEN_OIDC_AUTHORITY", "https://authentik.test/application/o/boodschappen/"))
             .ToArray();
 
         var ex = Assert.Throws<InvalidOperationException>(() => Build(settings));
 
-        Assert.Contains("OIDC_CLIENT_ID", ex.Message);
-        Assert.Contains("OIDC_CLIENT_SECRET", ex.Message);
+        Assert.Contains("BOODSCHAPPEN_OIDC_CLIENT_ID", ex.Message);
+        Assert.Contains("BOODSCHAPPEN_OIDC_CLIENT_SECRET", ex.Message);
     }
 
     [Fact]
@@ -112,9 +112,9 @@ public class AppOptionsTests
     {
         var settings = Required.Where(s => s.Item1 != "APP_PASSWORD").Concat(
         [
-            ("OIDC_AUTHORITY", "https://authentik.test/application/o/mealie/"),
-            ("OIDC_CLIENT_ID", "mealie-picnic"),
-            ("OIDC_CLIENT_SECRET", "secret"),
+            ("BOODSCHAPPEN_OIDC_AUTHORITY", "https://authentik.test/application/o/boodschappen/"),
+            ("BOODSCHAPPEN_OIDC_CLIENT_ID", "mealie-picnic"),
+            ("BOODSCHAPPEN_OIDC_CLIENT_SECRET", "secret"),
         ]).ToArray();
 
         var options = Build(settings);

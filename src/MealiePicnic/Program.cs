@@ -4,6 +4,9 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.RateLimiting;
 using MealiePicnic;
+using MealiePicnic.Clients;
+using MealiePicnic.Presentation;
+using MealiePicnic.Storage;
 using Microsoft.AspNetCore.Authentication;          // SignInAsync / SignOutAsync
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -17,6 +20,7 @@ var builder = WebApplication.CreateBuilder(args);
 var options = AppOptions.FromConfiguration(builder.Configuration);
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<TokenStore>();
+builder.Services.AddSingleton<HouseholdLinkStore>();
 builder.Services.AddHttpContextAccessor();
 
 // Keep the key ring on the mounted volume. The default location is inside the
@@ -94,6 +98,44 @@ if (options.OidcEnabled)
         // No upstream tokens are needed once the identity (the `sub` claim) is
         // established, so nothing sensitive from Authentik itself is retained.
         oidc.SaveTokens = false;
+
+        oidc.Events = new OpenIdConnectEvents
+        {
+            // Resolve the caller's Mealie household once, here at sign-in, and
+            // stash it on the cookie -- not on every request, which would mean
+            // an admin-API round trip on every shopping-list load (issue #17).
+            // A lookup failure (email not linked to any Mealie household, or
+            // Mealie briefly unreachable) must not block sign-in: the claim is
+            // simply left absent, and the mapping endpoints surface that
+            // explicitly (see HouseholdContext) instead of guessing a household.
+            OnTicketReceived = async ctx =>
+            {
+                var email = ctx.Principal?.FindFirstValue("email")
+                    ?? ctx.Principal?.FindFirstValue(ClaimTypes.Email);
+                if (string.IsNullOrWhiteSpace(email))
+                    return;
+
+                var mealie = ctx.HttpContext.RequestServices.GetRequiredService<MealieClient>();
+                var log = ctx.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                try
+                {
+                    var householdId = await mealie.FindHouseholdIdByEmailAsync(email, ctx.HttpContext.RequestAborted);
+                    if (householdId is { } id)
+                    {
+                        ((ClaimsIdentity)ctx.Principal!.Identity!)
+                            .AddClaim(new Claim(HouseholdContext.ClaimType, HouseholdKey.From(id)));
+                    }
+                    else
+                    {
+                        log.LogWarning("No Mealie household found for {Email}", email);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    log.LogWarning(ex, "Household lookup failed for {Email}", email);
+                }
+            },
+        };
     });
 }
 
@@ -242,7 +284,8 @@ async Task<IResult> HandlePasswordLoginAsync(HttpContext ctx, AppOptions opt, IL
     }
 
     var identity = new ClaimsIdentity(
-        [new Claim(ClaimTypes.Name, "owner"), new Claim(ClaimTypes.NameIdentifier, UserKey.LocalSubject)],
+        [new Claim(ClaimTypes.Name, "owner"), new Claim(ClaimTypes.NameIdentifier, UserKey.LocalSubject),
+         new Claim(HouseholdContext.ClaimType, HouseholdKey.Local)],
         CookieAuthenticationDefaults.AuthenticationScheme);
     await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
         new ClaimsPrincipal(identity));
@@ -308,6 +351,22 @@ app.MapPost("/logout", async (HttpContext ctx) =>
 
 app.MapGet("/", () => Results.Content(Html.AppPage, "text/html"));
 
+// The signed-in identity resolved to no Mealie household at login (see the
+// OIDC OnTicketReceived handler above) -- e.g. the email is not linked to a
+// household in Mealie yet. Not a permission problem (403), a data/config one:
+// naming the email lets whoever sees it know exactly what to fix (issue #17).
+static IResult NoHousehold(ClaimsPrincipal user)
+{
+    var email = user.FindFirstValue("email") ?? user.FindFirstValue(ClaimTypes.Email);
+    return Results.Json(new
+    {
+        error = "no_household",
+        message = string.IsNullOrWhiteSpace(email)
+            ? "Dit account is niet gekoppeld aan een Mealie huishouden."
+            : $"Dit account ({email}) is niet gekoppeld aan een Mealie huishouden. Vraag een beheerder dit te koppelen.",
+    }, statusCode: StatusCodes.Status422UnprocessableEntity);
+}
+
 var api = app.MapGroup("/api");
 
 // ----------------------------------------------------------------- picnic auth
@@ -362,11 +421,16 @@ api.MapGet("/lists", async (MealieClient mealie, AppOptions opt, CancellationTok
     Results.Ok(new { defaultName = opt.MealieList, lists = await mealie.GetListsAsync(ct) }));
 
 // listId is optional: omitted falls back to the MEALIE_LIST default.
-api.MapGet("/list", async (string? listId, MealieClient mealie, CancellationToken ct) =>
+api.MapGet("/list", async (string? listId, MealieClient mealie, HouseholdLinkStore links, HttpContext ctx, CancellationToken ct) =>
 {
     if (listId is not null && !Guid.TryParse(listId, out _))
         return Results.BadRequest(new { error = "invalid_list_id" });
-    return Results.Ok(await mealie.GetItemsAsync(listId, ct));
+
+    var householdKey = HouseholdContext.KeyOf(ctx.User);
+    if (householdKey is null) return NoHousehold(ctx.User);
+
+    var items = await mealie.GetItemsAsync(listId, ct);
+    return Results.Ok(links.Merge(householdKey, items));
 });
 
 api.MapGet("/search", async (string term, PicnicClient picnic, CancellationToken ct) =>
@@ -397,59 +461,60 @@ api.MapGet("/image/{imageId}", async (string imageId, PicnicClient picnic, Cance
 
 // ----------------------------------------------------------------- mapping
 
-api.MapPost("/link", async (LinkRequest? body, MealieClient mealie, CancellationToken ct) =>
+api.MapPost("/link", (LinkRequest? body, HouseholdLinkStore links, HttpContext ctx) =>
 {
     if (body is null || !Guid.TryParse(body.FoodId, out _)
         || string.IsNullOrWhiteSpace(body.PicnicUid)
         || !Regex.IsMatch(body.PicnicUid, "^[A-Za-z0-9_-]{1,32}$"))
         return Results.BadRequest(new { error = "invalid_request" });
 
-    var extras = await mealie.SetFoodExtrasAsync(body.FoodId, new Dictionary<string, string>
-    {
-        [MealieClient.ExtraUid] = body.PicnicUid,
-        [MealieClient.ExtraFlag] = "true",
-        [MealieClient.ExtraLabel] = body.Label ?? "",
-        // Stored so the basket can work out how many packs a weight needs.
-        [MealieClient.ExtraPack] = body.Pack ?? "",
-    }, ct);
-    return Results.Ok(new { ok = true, extras });
+    var householdKey = HouseholdContext.KeyOf(ctx.User);
+    if (householdKey is null) return NoHousehold(ctx.User);
+
+    // label/pack stored so the basket can work out how many packs a weight needs.
+    links.Link(householdKey, body.FoodId, body.PicnicUid, body.Label, body.Pack);
+    return Results.Ok(new { ok = true });
 });
 
-api.MapPost("/exclude", async (FoodRef? body, MealieClient mealie, CancellationToken ct) =>
+api.MapPost("/exclude", (FoodRef? body, HouseholdLinkStore links, HttpContext ctx) =>
 {
     if (body is null || !Guid.TryParse(body.FoodId, out _))
         return Results.BadRequest(new { error = "invalid_request" });
 
-    var extras = await mealie.SetFoodExtrasAsync(body.FoodId, new Dictionary<string, string>
-    {
-        [MealieClient.ExtraFlag] = "false",
-    }, ct);
-    return Results.Ok(new { ok = true, extras });
+    var householdKey = HouseholdContext.KeyOf(ctx.User);
+    if (householdKey is null) return NoHousehold(ctx.User);
+
+    links.Exclude(householdKey, body.FoodId);
+    return Results.Ok(new { ok = true });
 });
 
 // Revert an exclusion: clear the flag so the item shows up as 'new' again.
-api.MapPost("/include", async (FoodRef? body, MealieClient mealie, CancellationToken ct) =>
+api.MapPost("/include", (FoodRef? body, HouseholdLinkStore links, HttpContext ctx) =>
 {
     if (body is null || !Guid.TryParse(body.FoodId, out _))
         return Results.BadRequest(new { error = "invalid_request" });
 
-    var extras = await mealie.SetFoodExtrasAsync(body.FoodId, new Dictionary<string, string>
-    {
-        [MealieClient.ExtraFlag] = "",
-    }, ct);
-    return Results.Ok(new { ok = true, extras });
+    var householdKey = HouseholdContext.KeyOf(ctx.User);
+    if (householdKey is null) return NoHousehold(ctx.User);
+
+    links.Clear(householdKey, body.FoodId);
+    return Results.Ok(new { ok = true });
 });
 
 // ----------------------------------------------------------------- basket
 
 api.MapPost("/basket", async (BasketRequest? body, MealieClient mealie, PicnicClient picnic,
+                              HouseholdLinkStore links, HttpContext ctx,
                               ILogger<Program> log, CancellationToken ct) =>
 {
     var listId = body?.ListId;
     if (listId is not null && !Guid.TryParse(listId, out _))
         return Results.BadRequest(new { error = "invalid_list_id" });
 
-    var items = await mealie.GetItemsAsync(listId, ct);
+    var householdKey = HouseholdContext.KeyOf(ctx.User);
+    if (householdKey is null) return NoHousehold(ctx.User);
+
+    var items = links.Merge(householdKey, await mealie.GetItemsAsync(listId, ct));
     var results = new List<CartResult>();
     var consecutiveFailures = 0;
     var aborted = false;

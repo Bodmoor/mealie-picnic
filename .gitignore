@@ -583,3 +583,12 @@ FodyWeavers.xsd
 data/
 .env
 **/launchSettings.json
+
+# Runtime DATA_DIR artifacts (Picnic auth token/device id, per-user token
+# cache, ASP.NET Core DataProtection keys) if a local launchSettings.json
+# points DATA_DIR at a folder inside src/MealiePicnic instead of data/ above --
+# must never be committed regardless of what that folder is named.
+src/MealiePicnic/**/picnic-token
+src/MealiePicnic/**/picnic-device
+src/MealiePicnic/**/keys/
+src/MealiePicnic/**/users/

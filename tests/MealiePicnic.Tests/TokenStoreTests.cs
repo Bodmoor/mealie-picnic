@@ -1,3 +1,4 @@
+using MealiePicnic.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace MealiePicnic.Tests;
