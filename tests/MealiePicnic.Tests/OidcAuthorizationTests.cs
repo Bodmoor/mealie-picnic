@@ -1,0 +1,117 @@
+using System.Net;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+
+namespace MealiePicnic.Tests;
+
+/// <summary>
+/// Covers the behaviour that changes once OIDC is configured: /login stops
+/// showing the password form and challenges instead, and the /login/admin
+/// break-glass route only exists alongside APP_PASSWORD. The OIDC handshake
+/// itself is ASP.NET Core's own well-tested code, so these tests short-circuit
+/// discovery with a static Configuration instead of reaching a real Authentik.
+/// </summary>
+public class OidcAuthorizationTests
+{
+    private const string Password = "correct-horse-battery-staple";
+
+    private static WebApplicationFactory<Program> NewFactory(bool appPassword = true) =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("MEALIE_URL", "https://mealie.test");
+            builder.UseSetting("MEALIE_TOKEN", "test-token");
+            if (appPassword) builder.UseSetting("APP_PASSWORD", Password);
+            builder.UseSetting("OIDC_AUTHORITY", "https://authentik.test/application/o/mealie/");
+            builder.UseSetting("OIDC_CLIENT_ID", "mealie-picnic");
+            builder.UseSetting("OIDC_CLIENT_SECRET", "secret");
+            builder.UseSetting("DATA_DIR",
+                Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+
+            // Bypass real metadata discovery: a fake Authority is unreachable from
+            // a test run, and the handler consults Options.Configuration first.
+            builder.ConfigureServices(services =>
+                services.Configure<OpenIdConnectOptions>(OpenIdConnectDefaults.AuthenticationScheme, o =>
+                    o.Configuration = new OpenIdConnectConfiguration
+                    {
+                        AuthorizationEndpoint = "https://authentik.test/application/o/authorize/",
+                        TokenEndpoint = "https://authentik.test/application/o/token/",
+                        Issuer = "https://authentik.test/application/o/mealie/",
+                    }));
+        });
+
+    private static HttpClient NewClient(WebApplicationFactory<Program> factory) =>
+        factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+    [Fact]
+    public async Task Login_challenges_oidc_instead_of_showing_the_password_form()
+    {
+        using var factory = NewFactory();
+        var response = await NewClient(factory).GetAsync("/login");
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.StartsWith(
+            "https://authentik.test/application/o/authorize/",
+            response.Headers.Location!.ToString());
+    }
+
+    [Fact]
+    public async Task Legacy_login_post_is_gone_once_oidc_is_enabled()
+    {
+        using var factory = NewFactory();
+        var response = await NewClient(factory).PostAsync("/login",
+            new FormUrlEncodedContent([new("password", Password)]));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Panic_route_is_reachable_when_app_password_is_set()
+    {
+        using var factory = NewFactory(appPassword: true);
+        var response = await NewClient(factory).GetAsync("/login/admin");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("Wachtwoord", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Panic_route_is_absent_when_app_password_is_not_set()
+    {
+        // Not mapped at all, so an anonymous GET falls under the same global
+        // fallback-auth policy as any other unmapped path -- a redirect to the
+        // OIDC challenge, never the anonymous password form a mapped route
+        // would serve. That is what actually proves it does not exist.
+        using var factory = NewFactory(appPassword: false);
+        var response = await NewClient(factory).GetAsync("/login/admin");
+
+        Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(response.Headers.Contains("Set-Cookie"));
+    }
+
+    [Fact]
+    public async Task Correct_panic_password_sets_the_same_session_cookie()
+    {
+        using var factory = NewFactory();
+        var response = await NewClient(factory).PostAsync("/login/admin",
+            new FormUrlEncodedContent([new("password", Password)]));
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        var cookie = Assert.Single(response.Headers.GetValues("Set-Cookie"),
+            c => c.StartsWith("mealiepicnic="));
+        Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Wrong_panic_password_sets_no_cookie()
+    {
+        using var factory = NewFactory();
+        var response = await NewClient(factory).PostAsync("/login/admin",
+            new FormUrlEncodedContent([new("password", "wrong")]));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(response.Headers.Contains("Set-Cookie"));
+        Assert.Contains("Onjuist wachtwoord", await response.Content.ReadAsStringAsync());
+    }
+}

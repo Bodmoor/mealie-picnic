@@ -4,97 +4,114 @@ namespace MealiePicnic;
 /// Persists the Picnic auth token on the mounted volume so 2FA is a rare chore
 /// rather than a per-restart one. The token is a bearer credential for a real
 /// account, so the file is written 0600 where the platform allows it.
+///
+/// Storage is keyed by an optional per-user id. A null key uses the original
+/// flat DATA_DIR/picnic-token layout unchanged, so single-password deployments
+/// that never configure OIDC see no behaviour change at all. A real key (the
+/// hashed OIDC `sub`, or the fixed panic-login subject -- see UserKey) stores
+/// under DATA_DIR/users/{key}/ instead, so every signed-in identity gets its
+/// own Picnic session once OIDC is enabled.
 /// </summary>
 public sealed class TokenStore
 {
-    private readonly string _tokenPath;
-    private readonly string _devicePath;
+    private readonly string _dataDir;
     private readonly ILogger<TokenStore> _log;
     private readonly object _lock = new();
-    private string? _token;
-    private string? _deviceId;
+    private readonly Dictionary<string, Entry> _entries = new();
 
     public TokenStore(AppOptions options, ILogger<TokenStore> log)
     {
         _log = log;
-        Directory.CreateDirectory(options.DataDir);
-        _tokenPath = Path.Combine(options.DataDir, "picnic-token");
-        _devicePath = Path.Combine(options.DataDir, "picnic-device");
-
-        if (File.Exists(_tokenPath))
-        {
-            _token = File.ReadAllText(_tokenPath).Trim();
-            if (_token.Length == 0)
-            {
-                // A crash mid-write can leave a truncated file; treat it as absent
-                // rather than presenting an empty bearer token to Picnic.
-                _token = null;
-            }
-            else
-            {
-                _log.LogInformation("Loaded cached Picnic token from {Path}", _tokenPath);
-            }
-        }
+        _dataDir = options.DataDir;
+        Directory.CreateDirectory(_dataDir);
     }
 
-    public string? Token
+    public string? Token(string? userKey = null)
     {
-        get { lock (_lock) return _token; }
+        lock (_lock) return Get(userKey).Token;
     }
 
     /// <summary>
-    /// Per-install device id sent as x-picnic-did. Picnic binds 2FA verification to
-    /// it, so it must be stable across restarts -- but it must NOT be a constant in
-    /// source, or every deployment of this app presents the same device fingerprint.
-    /// Generated once, persisted next to the token; clearing it forces a new 2FA.
+    /// Per-install (and, once OIDC is enabled, per-user) device id sent as
+    /// x-picnic-did. Picnic binds 2FA verification to it, so it must be stable
+    /// across restarts -- but it must NOT be a constant in source, or every
+    /// deployment of this app presents the same device fingerprint. Generated
+    /// once, persisted next to the token; clearing it forces a new 2FA.
     /// </summary>
-    public string DeviceId
-    {
-        get
-        {
-            lock (_lock)
-            {
-                if (_deviceId is not null)
-                    return _deviceId;
-
-                if (File.Exists(_devicePath))
-                {
-                    var existing = File.ReadAllText(_devicePath).Trim();
-                    if (existing.Length == 16)
-                        return _deviceId = existing;
-                }
-
-                _deviceId = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(8));
-                WriteAtomic(_devicePath, _deviceId);
-                _log.LogInformation("Generated new Picnic device id");
-                return _deviceId;
-            }
-        }
-    }
-
-    public void Save(string token)
+    public string DeviceId(string? userKey = null)
     {
         lock (_lock)
         {
-            _token = token;
+            var entry = Get(userKey);
+            if (entry.DeviceId is not null)
+                return entry.DeviceId;
+
+            if (File.Exists(entry.DevicePath))
+            {
+                var existing = File.ReadAllText(entry.DevicePath).Trim();
+                if (existing.Length == 16)
+                {
+                    entry.DeviceId = existing;
+                    return existing;
+                }
+            }
+
+            entry.DeviceId = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(8));
+            WriteAtomic(entry.DevicePath, entry.DeviceId);
+            _log.LogInformation("Generated new Picnic device id for {Key}", userKey ?? "(default)");
+            return entry.DeviceId;
+        }
+    }
+
+    public void Save(string token, string? userKey = null)
+    {
+        lock (_lock)
+        {
+            var entry = Get(userKey);
+            entry.Token = token;
             try
             {
-                WriteAtomic(_tokenPath, token);
+                WriteAtomic(entry.TokenPath, token);
             }
             catch (Exception ex)
             {
-                _log.LogWarning(ex, "Could not persist Picnic token to {Path}", _tokenPath);
+                _log.LogWarning(ex, "Could not persist Picnic token to {Path}", entry.TokenPath);
             }
         }
     }
 
-    public void Clear()
+    public void Clear(string? userKey = null)
     {
         lock (_lock)
         {
-            _token = null;
-            try { if (File.Exists(_tokenPath)) File.Delete(_tokenPath); } catch { /* best effort */ }
+            var entry = Get(userKey);
+            entry.Token = null;
+            try { if (File.Exists(entry.TokenPath)) File.Delete(entry.TokenPath); } catch { /* best effort */ }
         }
+    }
+
+    private Entry Get(string? userKey)
+    {
+        var key = userKey ?? "";
+        if (_entries.TryGetValue(key, out var cached))
+            return cached;
+
+        var dir = key.Length == 0 ? _dataDir : Path.Combine(_dataDir, "users", key);
+        Directory.CreateDirectory(dir);
+
+        var entry = new Entry(Path.Combine(dir, "picnic-token"), Path.Combine(dir, "picnic-device"));
+        if (File.Exists(entry.TokenPath))
+        {
+            var token = File.ReadAllText(entry.TokenPath).Trim();
+            // A crash mid-write can leave a truncated file; treat it as absent
+            // rather than presenting an empty bearer token to Picnic.
+            entry.Token = token.Length == 0 ? null : token;
+            if (entry.Token is not null)
+                _log.LogInformation("Loaded cached Picnic token from {Path}", entry.TokenPath);
+        }
+
+        _entries[key] = entry;
+        return entry;
     }
 
     /// <summary>
@@ -115,5 +132,13 @@ public sealed class TokenStore
             stream.Flush(flushToDisk: true);
         }
         File.Move(tmp, path, overwrite: true);
+    }
+
+    private sealed class Entry(string tokenPath, string devicePath)
+    {
+        public string TokenPath { get; } = tokenPath;
+        public string DevicePath { get; } = devicePath;
+        public string? Token { get; set; }
+        public string? DeviceId { get; set; }
     }
 }

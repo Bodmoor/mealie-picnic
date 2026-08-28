@@ -6,6 +6,7 @@ using System.Threading.RateLimiting;
 using MealiePicnic;
 using Microsoft.AspNetCore.Authentication;          // SignInAsync / SignOutAsync
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -16,6 +17,7 @@ var builder = WebApplication.CreateBuilder(args);
 var options = AppOptions.FromConfiguration(builder.Configuration);
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<TokenStore>();
+builder.Services.AddHttpContextAccessor();
 
 // Keep the key ring on the mounted volume. The default location is inside the
 // container filesystem, so recreating the container (any image update) would
@@ -35,7 +37,7 @@ builder.Services.AddHttpClient<PicnicClient>();
 
 // Single-password cookie auth in front of everything. Simple on purpose: this app
 // holds credentials for a supermarket account, so it must not be open.
-builder.Services
+var authentication = builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(cookie =>
     {
@@ -53,6 +55,34 @@ builder.Services
             ? CookieSecurePolicy.Always
             : CookieSecurePolicy.SameAsRequest;
     });
+
+// OIDC (e.g. Authentik) is additive: when configured, it becomes the primary way
+// in via a challenge from GET /login, but the cookie above stays the sign-in
+// scheme regardless of how the user got there -- OIDC only establishes identity.
+// Which groups may reach this application at all is left entirely to Authentik's
+// own application/provider policy bindings (enforced during the authorize
+// request itself, not just dashboard visibility) -- nothing is re-checked here.
+if (options.OidcEnabled)
+{
+    authentication.AddOpenIdConnect(oidc =>
+    {
+        oidc.Authority = options.OidcAuthority;
+        oidc.ClientId = options.OidcClientId;
+        oidc.ClientSecret = options.OidcClientSecret;
+        oidc.ResponseType = "code";
+        // The cookie above is what actually carries the session; OIDC is only
+        // consulted at challenge time.
+        oidc.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+        oidc.Scope.Clear();
+        oidc.Scope.Add("openid");
+        oidc.Scope.Add("profile");
+        oidc.Scope.Add("email");
+        oidc.GetClaimsFromUserInfoEndpoint = true;
+        // No upstream tokens are needed once the identity (the `sub` claim) is
+        // established, so nothing sensitive from Authentik itself is retained.
+        oidc.SaveTokens = false;
+    });
+}
 
 // Everything requires an authenticated user unless explicitly opted out. A new
 // endpoint added tomorrow is protected by default instead of public by default.
@@ -177,11 +207,11 @@ app.MapGet("/sw.js", () =>
     // No caching: a stale service worker is how PWAs get stuck on old code.
     Results.Content(Icons.ServiceWorker, "text/javascript")).AllowAnonymous();
 
-// Static files (the SPA) are behind auth too, hence no UseStaticFiles() before this.
-app.MapGet("/login", () => Results.Content(Html.LoginPage, "text/html"))
-   .AllowAnonymous();
-
-app.MapPost("/login", async (HttpContext ctx, AppOptions opt, ILogger<Program> log) =>
+// Password check shared by the plain /login form (no OIDC configured) and the
+// /login/admin panic route (OIDC configured, APP_PASSWORD kept as a fallback).
+// Either way the resulting session is the same synthetic "local" identity, so
+// TokenStore treats it exactly like any other user once OIDC is enabled.
+async Task<IResult> HandlePasswordLoginAsync(HttpContext ctx, AppOptions opt, ILogger<Program> log)
 {
     var form = await ctx.Request.ReadFormAsync();
     var supplied = form["password"].ToString();
@@ -199,13 +229,50 @@ app.MapPost("/login", async (HttpContext ctx, AppOptions opt, ILogger<Program> l
     }
 
     var identity = new ClaimsIdentity(
-        [new Claim(ClaimTypes.Name, "owner")],
+        [new Claim(ClaimTypes.Name, "owner"), new Claim(ClaimTypes.NameIdentifier, UserKey.LocalSubject)],
         CookieAuthenticationDefaults.AuthenticationScheme);
     await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
         new ClaimsPrincipal(identity));
 
     return Results.Redirect("/");
-}).AllowAnonymous().RequireRateLimiting("credentials");
+}
+
+// Static files (the SPA) are behind auth too, hence no UseStaticFiles() before this.
+// With OIDC configured this is the only login path a user ever sees: it challenges
+// Authentik immediately instead of rendering the password form. The cookie
+// handler's own redirect-to-/login (with ?ReturnUrl=...) is what lands here for
+// any unauthenticated request, so the original destination is preserved through
+// the round trip to Authentik and back.
+app.MapGet("/login", (HttpContext ctx, AppOptions opt) =>
+{
+    if (!opt.OidcEnabled)
+        return Results.Content(Html.LoginPage, "text/html");
+
+    var returnUrl = ctx.Request.Query["ReturnUrl"].ToString();
+    return Results.Challenge(
+        new AuthenticationProperties { RedirectUri = string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl },
+        [OpenIdConnectDefaults.AuthenticationScheme]);
+}).AllowAnonymous();
+
+// Once OIDC is configured, plain /login never shows a password form (see above),
+// so this becomes dead weight rather than a second, undocumented back door.
+app.MapPost("/login", async (HttpContext ctx, AppOptions opt, ILogger<Program> log) =>
+    opt.OidcEnabled ? Results.NotFound() : await HandlePasswordLoginAsync(ctx, opt, log)
+).AllowAnonymous().RequireRateLimiting("credentials");
+
+// Break-glass password login, only reachable when both OIDC and APP_PASSWORD are
+// configured. Deliberately not linked from anywhere in the UI -- an operator who
+// needs it already knows the URL; nothing here should tempt or confuse an
+// ordinary OIDC user.
+if (options.OidcEnabled && options.AppPassword.Length > 0)
+{
+    app.MapGet("/login/admin", () => Results.Content(Html.LoginPage, "text/html"))
+       .AllowAnonymous();
+
+    app.MapPost("/login/admin", (HttpContext ctx, AppOptions opt, ILogger<Program> log) =>
+        HandlePasswordLoginAsync(ctx, opt, log)
+    ).AllowAnonymous().RequireRateLimiting("credentials");
+}
 
 // POST, not GET: a state-changing GET can be triggered cross-site by an <img> tag,
 // and SameSite=Lax/Strict does not stop top-level GET navigations.
