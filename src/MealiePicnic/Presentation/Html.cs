@@ -54,6 +54,22 @@ public static class Html
     // executable JS or spending a round trip on a /api/strings fetch. The JSON is
     // serialized with the HTML-escaping encoder, so a value containing
     // "</script>" cannot close the block.
+    //
+    // Note there is no x-init anywhere below. The status line used to carry
+    // x-init="$store.picnic.refresh(); $store.me.refresh()", and the
+    // @alpinejs/csp build evaluates exactly one expression per directive: its
+    // parser takes one expression plus an optional trailing semicolon and throws
+    // on anything after that, and its interpreter has no node type for a
+    // statement sequence at all. So the directive threw on parse and NEITHER
+    // store was ever refreshed -- the signed-in account never appeared on the
+    // sign-out button and the Picnic status was stuck on its initial value
+    // (issue #43). Both stores now refresh from their own init(), which Alpine
+    // calls when the store is registered, so there is no expression to parse.
+    //
+    // This is the third bug of that shape here, after #26 and #33: the CSP build
+    // refuses something, the binding silently stays as it was, and nothing
+    // server-side is wrong. CspDirectiveAuditTests now guards the expression
+    // shape as well as the directive names.
     private static string Template(AppText text) => $$"""
         <!doctype html>
         <html lang="{{text.Lang}}"><meta charset="utf-8">
@@ -168,7 +184,7 @@ public static class Html
           <img src="/icons/192.png" width="34" height="34" alt="">
           <h1>Mealie &rarr; Picnic</h1>
         </a>
-        <div class="muted" x-data x-init="$store.picnic.refresh(); $store.me.refresh()" x-cloak>
+        <div class="muted" x-data x-cloak>
           <span x-show="$store.picnic.authenticated">{{text.PicnicLabel}}: <b class="ok">{{text.PicnicSignedIn}}</b>
             <a href="#" x-on:click.prevent="$store.picnic.logout()">{{text.PicnicSignOut}}</a></span>
           <span x-show="!$store.picnic.authenticated">{{text.PicnicLabel}}: <b class="bad">{{text.PicnicSignedOut}}</b>

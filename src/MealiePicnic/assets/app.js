@@ -34,8 +34,19 @@ document.addEventListener('alpine:init', () => {
   // "afmelden" -- easy to lose track of who's signed in on a shared household
   // browser. null (the local/password fallback identity has no email) means
   // the button stays unlabelled.
+  //
+  // Refreshed from the store's own init() rather than from an x-init attribute
+  // on the page (issue #43). Alpine calls init() on a store when it registers
+  // one, so there is no directive expression to evaluate -- which matters,
+  // because the @alpinejs/csp build parses exactly one expression per directive
+  // and the old shared x-init held two calls separated by a semicolon. It threw
+  // on parse, so neither store was ever refreshed and the button stayed
+  // unlabelled.
   Alpine.store('me', {
     label: null,
+    init() {
+      this.refresh();
+    },
     async refresh() {
       try {
         const r = await fetch('/api/me');
@@ -55,6 +66,12 @@ document.addEventListener('alpine:init', () => {
     // driven by htmx:responseError instead of by hand at each call site, so it
     // now covers every htmx action (search, link, exclude, basket), not just search.
     pendingRequest: null,
+
+    // Same as the me store: Alpine calls this on registration, so the status is
+    // fetched without a directive expression standing between the two (#43).
+    init() {
+      this.refresh();
+    },
 
     async refresh() {
       try {
