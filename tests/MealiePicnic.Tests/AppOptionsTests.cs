@@ -90,6 +90,25 @@ public class AppOptionsTests
     }
 
     [Fact]
+    public void Language_defaults_to_dutch_and_is_read_from_configuration()
+    {
+        Assert.Equal("nl", Build(Required).Language);
+        Assert.Equal("en", Build([.. Required, ("LANGUAGE", "en")]).Language);
+    }
+
+    // Issue #13: the interface language and the storefront country are separate
+    // axes. A Dutch storefront with an English interface is an ordinary setup
+    // (an English speaker living in the Netherlands), not a misconfiguration.
+    [Fact]
+    public void Language_is_independent_of_country()
+    {
+        var options = Build([.. Required, ("PICNIC_COUNTRY", "NL"), ("LANGUAGE", "en")]);
+
+        Assert.Equal("en", options.Language);
+        Assert.Contains("storefront-prod.nl.", options.PicnicBaseUrl);
+    }
+
+    [Fact]
     public void Builds_country_specific_picnic_urls()
     {
         var options = Build([.. Required, ("PICNIC_COUNTRY", "DE"), ("PICNIC_API_VERSION", "17")]);

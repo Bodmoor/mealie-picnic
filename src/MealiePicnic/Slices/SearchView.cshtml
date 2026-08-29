@@ -1,19 +1,20 @@
 @inherits RazorSlice<SearchViewModel>
 @{
+    var t = AppText.Current;
     var it = Model.Item;
     var listQs = $"listId={Uri.EscapeDataString(Model.ListId)}";
 }
 <div id="view">
     <div class="bar">
-        <button hx-get="@($"/api/list?{listQs}")" hx-target="#view" hx-swap="outerHTML">&larr; terug</button>
+        <button hx-get="@($"/api/list?{listQs}")" hx-target="#view" hx-swap="outerHTML">&larr; @t.Back</button>
         <b>@it.FoodName</b>
         @if (!string.IsNullOrEmpty(it.PicnicUid))
         {
-            <span class="muted">gekoppeld aan @(string.IsNullOrEmpty(it.PicnicLabel) ? it.PicnicUid : it.PicnicLabel)</span>
+            <span class="muted">@t.LinkedTo(string.IsNullOrEmpty(it.PicnicLabel) ? it.PicnicUid : it.PicnicLabel)</span>
         }
         else
         {
-            <span class="muted">nog niet gekoppeld</span>
+            <span class="muted">@t.NotLinkedYet</span>
         }
     </div>
     <div class="bar">
@@ -21,12 +22,12 @@
                hx-get="@($"/api/items/{it.FoodId}/search?{listQs}")" hx-target="#hits" hx-swap="innerHTML"
                hx-trigger="keyup changed delay:400ms"
                style="padding:7px 10px;border-radius:7px;border:1px solid #3a3d41;background:#15171a;color:#e8eaed">
-        <button hx-get="@($"/api/items/{it.FoodId}/search?{listQs}")" hx-include="#term" hx-target="#hits" hx-swap="innerHTML">Zoek</button>
+        <button hx-get="@($"/api/items/{it.FoodId}/search?{listQs}")" hx-include="#term" hx-target="#hits" hx-swap="innerHTML">@t.Search</button>
         <button class="danger" hx-post="@($"/api/exclude?{listQs}")" hx-vals='{"foodId":"@it.FoodId"}'
-                hx-target="#view" hx-swap="outerHTML">Niet bij Picnic</button>
+                hx-target="#view" hx-swap="outerHTML">@t.ExcludeFromPicnic</button>
     </div>
     <div id="hits" hx-get="@($"/api/items/{it.FoodId}/search?{listQs}&term={Uri.EscapeDataString(it.FoodName)}")"
          hx-trigger="load" hx-swap="innerHTML">
-        <p class="muted">Zoeken...</p>
+        <p class="muted">@t.Searching</p>
     </div>
 </div>

@@ -6,6 +6,28 @@
 // load in any order relative to the deferred Alpine script tag; both are
 // deferred, so they still run in document order, but this is the documented-safe
 // pattern regardless of that.
+
+// Issue #13: the strings this file writes, in the configured language. They
+// arrive in a <script type="application/json"> data block the shell renders
+// (Html.cs) rather than through IStringLocalizer, which cannot reach client-side
+// code, and rather than a fetch, which would cost a round trip before the login
+// dialog could say anything. The block is data, not script: its type is not a
+// JavaScript MIME type, so the strict script-src does not apply to it.
+//
+// This script is deferred and the block sits above it, so it is always parsed by
+// now. A missing or corrupt block is a bug in the shell, not a runtime state; it
+// degrades to blank labels rather than throwing, because a TypeError here would
+// take the whole Picnic login flow with it.
+const strings = (() => {
+  try {
+    return JSON.parse(document.getElementById('i18n').textContent);
+  } catch {
+    return {};
+  }
+})();
+
+const t = (key) => strings[key] ?? '';
+
 document.addEventListener('alpine:init', () => {
   // Issue #22: labels the "afmelden bij deze app" button with the signed-in
   // account, so it reads "afmelden (paul@example.com)" instead of just
@@ -49,9 +71,9 @@ document.addEventListener('alpine:init', () => {
       await this.refresh();
     },
 
-    // Called both when the user clicks "inloggen" and when a request was refused
-    // for lack of Picnic auth. Everything present in configuration means no
-    // dialog is needed at all.
+    // Called both when the user clicks the Picnic sign-in link and when a request
+    // was refused for lack of Picnic auth. Everything present in configuration
+    // means no dialog is needed at all.
     async promptLogin() {
       if (this.authenticated) { await this.runPending(); return; }
       if (this.hasConfiguredUser && this.hasConfiguredPassword) {
@@ -66,17 +88,16 @@ document.addEventListener('alpine:init', () => {
       const pass = document.getElementById('cpass');
       pass.value = '';
       pass.placeholder = this.hasConfiguredPassword
-        ? 'Laat leeg om het ingestelde wachtwoord te gebruiken'
-        : 'Wachtwoord';
+        ? t('passwordKeepConfigured')
+        : t('passwordPlaceholder');
 
       const missing = [
         this.hasConfiguredUser ? null : 'PICNIC_USER',
         this.hasConfiguredPassword ? null : 'PICNIC_PASSWORD',
       ].filter(Boolean);
       document.getElementById('credsMsg').textContent = missing.length
-        ? `Niet ingesteld in de configuratie: ${missing.join(' en ')}. `
-          + 'Vul aan; er wordt niets opgeslagen, alleen het token wordt bewaard.'
-        : 'Gegevens komen uit de configuratie. Pas ze hier eventueel aan.';
+        ? t('missingConfigBefore') + missing.join(t('and')) + t('missingConfigAfter')
+        : t('credsFromConfiguration');
 
       document.getElementById('creds').showModal();
     },
@@ -84,8 +105,8 @@ document.addEventListener('alpine:init', () => {
     async submitCreds() {
       const user = document.getElementById('cuser').value.trim();
       const pass = document.getElementById('cpass').value;
-      if (!user) { alert('Vul een e-mailadres in.'); return; }
-      if (!pass && !this.hasConfiguredPassword) { alert('Vul een wachtwoord in.'); return; }
+      if (!user) { alert(t('enterEmail')); return; }
+      if (!pass && !this.hasConfiguredPassword) { alert(t('enterPassword')); return; }
 
       document.getElementById('creds').close();
       document.getElementById('cpass').value = '';
@@ -101,20 +122,20 @@ document.addEventListener('alpine:init', () => {
         const text = await r.text();
         if (!r.ok) {
           if (text.includes('picnic_credentials')) { this.openCreds(); return; }
-          alert('Login mislukt: ' + text);
+          alert(t('loginFailed') + text);
           return;
         }
         const body = JSON.parse(text);
         if (body.needs2fa) {
           this.resetCooldown();
-          document.getElementById('twofaMsg').textContent = 'Kies waar de code naartoe moet.';
+          document.getElementById('twofaMsg').textContent = t('chooseChannel');
           document.getElementById('twofa').showModal();
           return;
         }
         await this.refresh();
         await this.runPending();
       } catch (e) {
-        alert('Login mislukt: ' + e.message);
+        alert(t('loginFailed') + e.message);
       }
     },
 
@@ -182,18 +203,18 @@ document.addEventListener('alpine:init', () => {
 
     async send2fa(channel) {
       this.channelButtons().forEach(b => b.disabled = true);
-      document.getElementById('twofaMsg').textContent = 'Code aanvragen...';
+      document.getElementById('twofaMsg').textContent = t('requestingCode');
       try {
         const r = await fetch('/api/picnic/2fa/generate', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel }),
         });
         if (!r.ok) throw new Error(await r.text());
-        document.getElementById('twofaMsg').textContent =
-          `Code verstuurd via ${channel === 'EMAIL' ? 'e-mail' : channel}.`;
+        document.getElementById('twofaMsg').textContent = t('codeSentVia')
+          .replace('{channel}', channel === 'EMAIL' ? t('emailChannelName') : channel);
         this.otpCells()[0]?.focus();
         this.startCooldown(30);
       } catch (e) {
-        document.getElementById('twofaMsg').textContent = 'Kon geen code sturen: ' + e.message;
+        document.getElementById('twofaMsg').textContent = t('couldNotSendCode') + e.message;
         this.resetCooldown();
       }
     },
@@ -210,7 +231,7 @@ document.addEventListener('alpine:init', () => {
         document.getElementById('twofa').close();
         await this.refresh();
         await this.runPending();
-      } catch (e) { alert('Verificatie mislukt: ' + e.message); }
+      } catch (e) { alert(t('verificationFailed') + e.message); }
     },
 
     closeTwofa() {
@@ -264,39 +285,40 @@ document.addEventListener('alpine:init', () => {
   }));
 });
 
-// Issue #14. The label is looked up from this map rather than taken from the
-// response, so nothing from the wire is ever written into the markup -- the same
-// rule the rest of this function follows. A group the server knows and this
-// build does not is skipped rather than rendered raw.
-const ALLERGEN_LABELS = { nuts: 'noten', milk: 'melk' };
-
+// The strings here come from the #i18n block, but the escaping rule is unchanged:
+// everything interpolated below is our own endpoint's booleans and numbers, or a
+// translation we wrote, never product text from Picnic.
+//
+// That still holds for the allergen chips (issue #14) now that their labels are
+// translated: the label is looked up by the group key rather than taken from the
+// response, so nothing from the wire reaches the markup. A group the server knows
+// and this build has no label for is skipped rather than rendered raw.
+//
 // A tick means Picnic marked the allergen itself, in the emphasis EU labelling
 // requires. A question mark means our own word list matched ordinary ingredient
 // text. They are different claims and the card must not blur them.
-const ALLERGEN_TITLES = {
-  declared: 'Picnic markeert dit allergeen in de ingrediëntenlijst',
-  suspected: 'Gevonden in de ingrediëntentekst, maar niet door Picnic gemarkeerd',
-};
-
 function factsHtml(d) {
   const out = [];
   if (d.organic) {
-    out.push('<img src="/icons/eu-organic.svg" alt="Biologisch"'
-      + ' title="Het product wordt op de Picnic-pagina als biologisch aangeduid">');
+    out.push(`<img src="/icons/eu-organic.svg" alt="${t('organicAlt')}" title="${t('organicTitle')}">`);
   }
+  const labels = strings.allergenLabels ?? {};
   for (const allergen of d.allergens ?? []) {
-    const label = ALLERGEN_LABELS[allergen.group];
+    const label = labels[allergen.group];
     if (!label) continue;
     const cls = allergen.declared ? 'allergen declared' : 'allergen';
-    const title = allergen.declared ? ALLERGEN_TITLES.declared : ALLERGEN_TITLES.suspected;
+    const title = allergen.declared ? t('allergenDeclared') : t('allergenSuspected');
     out.push(`<span class="${cls}" title="${title}">${label} ${allergen.declared ? '✓' : '?'}</span>`);
   }
   if (typeof d.saltGramsPer100 === 'number') {
     const g = d.saltGramsPer100;
     // EU front-of-pack thresholds: 1.5 g salt per 100 g is "high", 0.3 g is "low".
     const cls = g > 1.5 ? 'salt hi' : (g <= 0.3 ? 'salt lo' : 'salt');
-    const text = (Math.round(g * 100) / 100).toString().replace('.', ',');
-    out.push(`<span class="${cls}" title="Zout per 100 g">${text} g zout</span>`);
+    // The separator is the one the server formats prices with, so a card no
+    // longer shows "€2.69" beside "1,2 g zout" (issue #13).
+    const text = (Math.round(g * 100) / 100).toString()
+      .replace('.', strings.decimalSeparator ?? '.');
+    out.push(`<span class="${cls}" title="${t('saltTitle')}">${text} ${t('saltUnit')}</span>`);
   }
   return out.join('');
 }

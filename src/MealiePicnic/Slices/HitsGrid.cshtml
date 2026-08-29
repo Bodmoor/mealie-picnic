@@ -1,17 +1,18 @@
 @inherits RazorSlice<HitsModel>
 @using System.Text.Json
 @{
+    var t = AppText.Current;
     var it = Model.Item;
     var products = Model.Products;
     var stillLinked = !string.IsNullOrEmpty(it.PicnicUid) && products.All(p => p.Id != it.PicnicUid);
 }
 @if (stillLinked)
 {
-    <p class="muted">Huidige koppeling <b>@it.PicnicUid</b> staat niet in deze resultaten.</p>
+    <p class="muted">@t.LinkNotInResultsBefore<b>@it.PicnicUid</b>@t.LinkNotInResultsAfter</p>
 }
 @if (products.Count == 0)
 {
-    <p class="muted">Geen resultaten.</p>
+    <p class="muted">@t.NoResults</p>
 }
 else
 {
@@ -44,7 +45,7 @@ else
                 }
                 @if (isLinked)
                 {
-                    <div class="badge">&check; gekoppeld</div>
+                    <div class="badge">&check; @t.TagLinked</div>
                 }
                 <div class="n">@p.Name</div>
                 <div class="p"><b>@p.PriceText</b> @p.UnitQuantity</div>
@@ -59,9 +60,5 @@ else
        all because the cards themselves cannot: a product with no chip looks
        exactly like one whose page could not be read. The wording deliberately
        never claims a product is free of anything. *@
-    <p class="muted allergen-note">
-        Allergenen komen van de Picnic-productpagina. <b>&check;</b> betekent dat Picnic
-        het allergeen zelf markeert, <b>?</b> dat wij het woord in de ingrediënten vonden.
-        Geen label betekent niet dat het product vrij is van dat allergeen.
-    </p>
+    <p class="muted allergen-note">@t.AllergenNoteBeforeTick<b>&check;</b>@t.AllergenNoteBeforeQuestion<b>?</b>@t.AllergenNoteAfter</p>
 }

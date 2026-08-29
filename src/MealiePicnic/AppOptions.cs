@@ -12,6 +12,16 @@ public sealed class AppOptions
     public string PicnicCountry { get; init; } = "NL";
     public string PicnicApiVersion { get; init; } = "15";
 
+    /// <summary>
+    /// Interface language: "nl" or "en" (issue #13). Deliberately independent of
+    /// <see cref="PicnicCountry"/>. The two are different axes: the parsing rules
+    /// in ProductFacts read Picnic's own storefront text and follow the country,
+    /// while this follows whoever is reading the screen -- an English speaker
+    /// ordering from the Dutch storefront is an ordinary case, not a mismatch.
+    /// Anything unrecognised falls back to Dutch (see <see cref="AppText.For"/>).
+    /// </summary>
+    public string Language { get; init; } = "nl";
+
     /// <summary>Password for the web UI login screen. Optional once OIDC is
     /// configured, where it still works as a break-glass fallback at /login/admin.</summary>
     public string AppPassword { get; init; } = "";
@@ -87,6 +97,7 @@ public sealed class AppOptions
             PicnicPassword = Get("PICNIC_PASSWORD"),
             PicnicCountry = Get("PICNIC_COUNTRY", "NL"),
             PicnicApiVersion = Get("PICNIC_API_VERSION", "15"),
+            Language = Get("LANGUAGE", "nl"),
             AppPassword = Get("APP_PASSWORD"),
             OidcAuthority = Get("BOODSCHAPPEN_OIDC_AUTHORITY"),
             OidcClientId = Get("BOODSCHAPPEN_OIDC_CLIENT_ID"),

@@ -96,6 +96,7 @@ All via environment variables.
 | `PICNIC_USER`          | no*      | —              | *needed until a token is cached           |
 | `PICNIC_PASSWORD`      | no*      | —              |                                           |
 | `PICNIC_COUNTRY`       | no       | `NL`           | `NL`, `DE`, `FR`                          |
+| `LANGUAGE`             | no       | `nl`           | interface language: `nl` or `en` (`en-GB` and the like also select English). Independent of `PICNIC_COUNTRY` — the storefront stays whatever the country says, so an English interface on the Dutch storefront is a normal setup. Anything unrecognised falls back to Dutch. Also decides the decimal separator: `€2,69` / `1,2 g` in Dutch, `€2.69` / `1.2 g` in English |
 | `PICNIC_API_VERSION`   | no       | `15`           | bump if Picnic starts returning 400s      |
 | `SEARCH_CACHE_MINUTES` | no       | `30`           | in-memory cache for searches; product pages are held 12 h |
 | `DATA_DIR`             | no       | `/data`        | volume for the token and device id        |
@@ -185,8 +186,10 @@ POST /cart/add_product    {product_id, count}
   Picnic renames those blocks, both facts go quiet rather than wrong, and a warning is
   logged.
 * **Allergen chips are informational, and their absence proves nothing.** Two chips,
-  `noten` (all tree nuts and peanuts together) and `melk` (including `lactose`, `wei` and
-  `caseïne`), read from the ingredient accordion. A tick means Picnic emphasised the
+  `noten`/`nuts` (all tree nuts and peanuts together) and `melk`/`milk` (including
+  `lactose`, `wei` and `caseïne`), read from the ingredient accordion. The chip labels
+  follow `LANGUAGE`; the words matched against the page do not — those are Picnic's Dutch
+  storefront text and stay Dutch. A tick means Picnic emphasised the
   allergen itself, which EU labelling requires of a declaration; a question mark means our
   own word list matched ordinary text. A card with no chip is not a claim that the product
   is free of anything — it may equally be a page that could not be read, and the app never

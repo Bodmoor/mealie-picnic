@@ -16,6 +16,7 @@ namespace MealiePicnic.Tests;
 /// every path, because it is the only thing separating "Picnic says so" from
 /// "we spotted a word".
 /// </summary>
+[Collection(AppTextCollection.Name)]
 public class AllergenTests
 {
     private static IReadOnlyList<AllergenMark> Read(params string[] fragments) =>
@@ -179,6 +180,29 @@ public class AllergenTests
 
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(html, "allergen-note"));
         Assert.Contains("allergeen", html, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task The_explanation_is_translated_too()
+    {
+        // Issue #13 landed after this: the note is the one piece of allergen copy
+        // that lives server-side, so it is the one that could have been left in
+        // Dutch while the chips around it were translated.
+        var before = AppText.Current;
+        try
+        {
+            AppText.Current = AppText.English;
+            var html = await Grid();
+
+            // No apostrophe in the asserted fragment: the slice escapes it, so
+            // "Picnic's" arrives as "Picnic&#x27;s" and a naive substring misses.
+            Assert.Contains("No label does not mean the product is free of that allergen", html);
+            Assert.DoesNotContain("Allergenen komen", html);
+        }
+        finally
+        {
+            AppText.Current = before;
+        }
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 @inherits RazorSlice<ListViewModel>
 @{
+    var t = AppText.Current;
     var open = Model.Items.Where(i => !i.Checked).ToList();
     var fresh = open.Where(i => i.State == LinkState.New).ToList();
     var linked = open.Where(i => i.State == LinkState.Linked).ToList();
@@ -10,15 +11,15 @@
     {
         if (state == LinkState.New)
         {
-            <span class="tag new">nieuw</span>
+            <span class="tag new">@t.TagNew</span>
         }
         else if (state == LinkState.Linked)
         {
-            <span class="tag linked">gekoppeld</span>
+            <span class="tag linked">@t.TagLinked</span>
         }
         else
         {
-            <span class="tag">niet bij Picnic</span>
+            <span class="tag">@t.TagNotAtPicnic</span>
         }
     }
 
@@ -38,7 +39,7 @@
 }
 <div id="view" x-data="{ showExcluded: false }">
     <div class="bar">
-        <select name="listId" title="Mealie lijst"
+        <select name="listId" title="@t.MealieListPicker"
                 hx-post="/api/lists/select" hx-target="#view" hx-swap="outerHTML">
             @foreach (var l in Model.Lists)
             {
@@ -46,42 +47,42 @@
             }
         </select>
         <button class="primary" hx-get="@($"/api/list?listId={Uri.EscapeDataString(Model.CurrentListId)}")"
-                hx-target="#view" hx-swap="outerHTML">Haal Mealie lijst op</button>
+                hx-target="#view" hx-swap="outerHTML">@t.FetchMealieList</button>
         <form style="display:contents" hx-post="/api/basket" hx-target="#basketlog" hx-swap="innerHTML">
             <input type="hidden" name="listId" value="@Model.CurrentListId">
-            <button type="submit">Alles in Picnic mand</button>
-            <label class="chk"><input type="checkbox" name="checkOff" value="true" checked> afvinken in Mealie</label>
+            <button type="submit">@t.AddAllToBasket</button>
+            <label class="chk"><input type="checkbox" name="checkOff" value="true" checked> @t.CheckOffInMealie</label>
         </form>
-        <label class="chk"><input type="checkbox" x-model="showExcluded"> toon uitgesloten</label>
+        <label class="chk"><input type="checkbox" x-model="showExcluded"> @t.ShowExcluded</label>
     </div>
     <div id="basketlog" class="log"></div>
 
     @if (fresh.Count > 0)
     {
-        <h2>Nieuw (@fresh.Count)</h2>
+        <h2>@t.HeadingNew(fresh.Count)</h2>
         @foreach (var it in fresh) { ItemRow(it); }
     }
 
     @if (linked.Count > 0)
     {
-        <h2>Gekoppeld (@linked.Count)</h2>
+        <h2>@t.HeadingLinked(linked.Count)</h2>
         @foreach (var it in linked) { ItemRow(it); }
     }
 
     @if (excluded.Count > 0)
     {
         <div x-show="showExcluded" x-cloak>
-            <h2>Niet bij Picnic (@excluded.Count)</h2>
+            <h2>@t.HeadingNotAtPicnic(excluded.Count)</h2>
             @foreach (var it in excluded)
             {
                 <div class="item">
                     <div>
                         <div class="name">@it.FoodName</div>
-                        <div class="sub">uitgesloten</div>
+                        <div class="sub">@t.TagExcluded</div>
                     </div>
                     <button class="tag" hx-post="@($"/api/include?listId={Uri.EscapeDataString(Model.CurrentListId)}")"
                             hx-vals='{"foodId":"@it.FoodId"}'
-                            hx-target="#view" hx-swap="outerHTML">terugzetten</button>
+                            hx-target="#view" hx-swap="outerHTML">@t.Restore</button>
                 </div>
             }
         </div>
@@ -90,7 +91,7 @@
     @if (done.Count > 0)
     {
         <details class="done-block">
-            <summary>Afgevinkt / toegevoegd aan mand (@done.Count)</summary>
+            <summary>@t.HeadingDone(done.Count)</summary>
             @foreach (var it in done)
             {
                 <div class="item done-item">
@@ -98,7 +99,7 @@
                         <div class="name">@it.FoodName</div>
                         <div class="sub">@(string.IsNullOrEmpty(it.PicnicLabel) ? (string.IsNullOrEmpty(it.PicnicUid) ? it.Display : it.PicnicUid) : it.PicnicLabel)</div>
                     </div>
-                    <span class="tag">afgevinkt</span>
+                    <span class="tag">@t.TagCheckedOff</span>
                 </div>
             }
         </details>
@@ -106,10 +107,10 @@
 
     @if (Model.Items.Count == 0)
     {
-        <p class="muted">Lijst is leeg.</p>
+        <p class="muted">@t.ListEmpty</p>
     }
     @if (Model.Items.Count > 0 && open.Count == 0)
     {
-        <p class="muted">Alles op deze lijst is afgevinkt.</p>
+        <p class="muted">@t.ListAllCheckedOff</p>
     }
 </div>

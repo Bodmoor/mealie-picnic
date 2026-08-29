@@ -21,6 +21,12 @@ using Microsoft.AspNetCore.RateLimiting;
 var builder = WebApplication.CreateBuilder(args);
 
 var options = AppOptions.FromConfiguration(builder.Configuration);
+
+// One language for the whole process, fixed before anything renders (issue #13).
+// Set here rather than injected: LANGUAGE is a property of the deployment, so
+// there is nothing per-request to vary on, and the Razor slices take no services.
+AppText.Current = AppText.For(options.Language);
+
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<TokenStore>();
 builder.Services.AddSingleton<HouseholdLinkStore>();
@@ -412,8 +418,8 @@ static IResult NoHousehold(ClaimsPrincipal user)
     {
         error = "no_household",
         message = string.IsNullOrWhiteSpace(email)
-            ? "Dit account is niet gekoppeld aan een Mealie huishouden."
-            : $"Dit account ({email}) is niet gekoppeld aan een Mealie huishouden. Vraag een beheerder dit te koppelen.",
+            ? AppText.Current.NoHousehold
+            : AppText.Current.NoHouseholdForEmail(email),
     }, statusCode: StatusCodes.Status422UnprocessableEntity);
 }
 
@@ -716,7 +722,9 @@ api.MapPost("/basket", async (HttpContext ctx, MealieClient mealie, PicnicClient
             // (upstream error bodies can contain internal paths and payloads).
             log.LogWarning(ex, "Batch basket add failed for {Count} products", quantities.Count);
             aborted = true;
-            abortReason = ex is HttpRequestException ? "upstream request failed" : "internal error";
+            abortReason = ex is HttpRequestException
+                ? AppText.Current.BasketUpstreamFailed
+                : AppText.Current.BasketInternalError;
         }
 
         foreach (var item in toAdd)
@@ -728,7 +736,7 @@ api.MapPost("/basket", async (HttpContext ctx, MealieClient mealie, PicnicClient
             if (aborted || cart is null || !PicnicClient.CartHasProduct(cart, item.PicnicUid!))
             {
                 results.Add(new CartResult(item.FoodName, item.PicnicUid!, item.Amount, false,
-                    aborted ? abortReason : "Picnic weigerde het product"));
+                    aborted ? abortReason : AppText.Current.BasketPicnicRefused));
                 continue;
             }
 
