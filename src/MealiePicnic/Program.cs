@@ -43,7 +43,12 @@ builder.Services
     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(options.DataDir, "keys")));
 
 // Bounded: search terms and image ids are caller-chosen, so an unbounded cache is
-// an OOM waiting to happen. Entries set their Size (bytes for images, 1 for JSON).
+// an OOM waiting to happen.
+//
+// Every entry sets its Size in approximate BYTES, so this limit means what it
+// says. It did not before: images counted their real length while a search list
+// claimed a flat 64 KB and a details record claimed 1 KB, which made the budget
+// a number with no unit and 64 MB a guess about nothing in particular.
 builder.Services.AddMemoryCache(cache => cache.SizeLimit = 64 * 1024 * 1024);
 
 builder.Services.AddHttpClient<MealieClient>();
@@ -615,14 +620,30 @@ api.MapGet("/details/{productId}", async (string productId, PicnicClient picnic,
     return Results.Ok(await picnic.GetDetailsAsync(productId, ct));
 });
 
-api.MapGet("/image/{imageId}", async (string imageId, PicnicClient picnic, CancellationToken ct) =>
+api.MapGet("/image/{imageId}", async (string imageId, HttpContext ctx, PicnicClient picnic, CancellationToken ct) =>
 {
     // Route values arrive URL-decoded, so ..%2F.. would otherwise walk up the
     // Picnic storefront path (a limited SSRF). Image ids are long hex strings.
     if (!Regex.IsMatch(imageId, "^[A-Za-z0-9_-]{1,128}$"))
         return Results.BadRequest(new { error = "invalid_image_id" });
 
+    // The server cached these all along; the browser did not, because nothing
+    // set a header. Every htmx swap of the results grid therefore re-requested
+    // each visible image. The id is Picnic's own content id, so the bytes at
+    // this URL genuinely never change -- "immutable" here is the same claim
+    // /assets makes with its content hash, and lets a repeat view of the same
+    // grid skip the request entirely rather than merely revalidate it.
+    //
+    // Private, not public: these travel through an authenticated endpoint, and
+    // a shared proxy has no business holding them.
+    //
+    // Set AFTER the fetch, deliberately. A Picnic auth failure here is turned
+    // into a 401 by the middleware above, and the response has not started yet,
+    // so a header set beforehand would survive onto that 401 -- telling the
+    // browser to cache "not authorised" for a week and leaving the grid
+    // permanently broken for that image until site data was cleared.
     var bytes = await picnic.GetImageAsync(imageId, "medium", ct);
+    ctx.Response.Headers.CacheControl = "private, max-age=604800, immutable";
     return Results.File(bytes, "image/png");
 });
 

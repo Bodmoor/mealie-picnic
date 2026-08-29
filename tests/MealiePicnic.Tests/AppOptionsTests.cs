@@ -89,6 +89,16 @@ public class AppOptionsTests
         Assert.Equal("Boodschappen", options.MealieList);
     }
 
+    [Theory]
+    [InlineData(null, 168)]
+    [InlineData("24", 24)]
+    [InlineData("0", 168)]        // a zero TTL would mean "never cache"; treat it as unset
+    [InlineData("-5", 168)]
+    [InlineData("weekly", 168)]   // unparsable falls back rather than throwing at startup
+    public void Product_facts_ttl_defaults_to_a_week(string? configured, int expected) =>
+        Assert.Equal(expected,
+            Build([.. Required, ("PRODUCT_FACTS_TTL_HOURS", configured)]).ProductFactsTtlHours);
+
     [Fact]
     public void Language_defaults_to_dutch_and_is_read_from_configuration()
     {

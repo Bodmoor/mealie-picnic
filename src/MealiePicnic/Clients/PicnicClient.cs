@@ -216,7 +216,10 @@ public sealed class PicnicClient(
         cache.Set(key, products, new MemoryCacheEntryOptions
         {
             AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(options.SearchCacheMinutes),
-            Size = 64 * 1024,          // nominal: a parsed result list is small
+            // Approximate bytes, like every other entry, so the cache's size
+            // limit is a real budget: a product is five short strings and an
+            // int, and a page of results is rarely more than a few dozen.
+            Size = 256 + products.Count * 256,
         });
         log.LogInformation("Search '{Term}' -> {Count} products", term, products.Count);
         return products;
@@ -302,7 +305,9 @@ public sealed class PicnicClient(
         cache.Set(key, details, new MemoryCacheEntryOptions
         {
             AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(options.ProductFactsTtlHours),
-            Size = 1024,
+            // Approximate bytes: two flags, a number and a short salt string,
+            // plus at most a couple of allergen marks.
+            Size = 256 + details.Allergens.Count * 64,
         });
 
     /// <summary>Parse a product page. Static and internal so tests can feed it a tree.</summary>
