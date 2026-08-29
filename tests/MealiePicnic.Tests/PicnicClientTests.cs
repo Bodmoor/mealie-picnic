@@ -521,6 +521,61 @@ public class PicnicClientTests
 
         Assert.False(details.Organic);
         Assert.Null(details.SaltGramsPer100);
+        Assert.Empty(details.Allergens);
+    }
+
+    // ------------------------------------------------------------- allergens
+
+    [Fact]
+    public async Task Details_read_allergens_from_the_ingredient_accordion()
+    {
+        // The fixture's ingredient list is "Volle melk" -- a plain mention, so
+        // the milk group comes back uncertain rather than declared.
+        var handler = new StubHandler().OnJson("product-details-page-root", ProductPage);
+
+        var details = await TestFactory.Picnic(handler, tokens: Tokens("tok"))
+            .GetDetailsAsync("s1000001", default);
+
+        var milk = Assert.Single(details.Allergens);
+        Assert.Equal(AllergenGroups.Milk, milk.Group);
+        Assert.False(milk.Declared);
+    }
+
+    [Fact]
+    public async Task Details_mark_an_emphasised_allergen_as_declared()
+    {
+        // Issue #14: the emphasis EU labelling requires is the one signal that is
+        // Picnic asserting the allergen, so it must survive the parse intact --
+        // ProductFacts.Clean strips the markers, and this reads before that.
+        var page = ProductPage.Replace(
+            """ "body": { "markdown": "Volle melk" } """.Trim(),
+            """ "body": { "markdown": "Volle **melk**, hazelnoten" } """.Trim());
+        var handler = new StubHandler().OnJson("product-details-page-root", page);
+
+        var details = await TestFactory.Picnic(handler, tokens: Tokens("tok"))
+            .GetDetailsAsync("s1000001", default);
+
+        Assert.Equal(
+            [new AllergenMark(AllergenGroups.Nuts, false), new AllergenMark(AllergenGroups.Milk, true)],
+            details.Allergens);
+    }
+
+    [Fact]
+    public async Task Details_do_not_take_allergens_from_a_suggested_alternative()
+    {
+        // The sibling of the organic rule: "alternatives-container" holds other
+        // products, and their ingredients are not this product's. Allergens are
+        // read from the accordion alone, so a nut spread sitting next to a carton
+        // of milk cannot put a nut chip on the milk.
+        var page = ProductPage.Replace(
+            "\"markdown\": \"Biologisch, zonder zout\"",
+            "\"markdown\": \"Bevat **hazelnoten**\"");
+        var handler = new StubHandler().OnJson("product-details-page-root", page);
+
+        var details = await TestFactory.Picnic(handler, tokens: Tokens("tok"))
+            .GetDetailsAsync("s1000001", default);
+
+        Assert.DoesNotContain(details.Allergens, a => a.Group == AllergenGroups.Nuts);
     }
 
     [Theory]

@@ -264,11 +264,32 @@ document.addEventListener('alpine:init', () => {
   }));
 });
 
+// Issue #14. The label is looked up from this map rather than taken from the
+// response, so nothing from the wire is ever written into the markup -- the same
+// rule the rest of this function follows. A group the server knows and this
+// build does not is skipped rather than rendered raw.
+const ALLERGEN_LABELS = { nuts: 'noten', milk: 'melk' };
+
+// A tick means Picnic marked the allergen itself, in the emphasis EU labelling
+// requires. A question mark means our own word list matched ordinary ingredient
+// text. They are different claims and the card must not blur them.
+const ALLERGEN_TITLES = {
+  declared: 'Picnic markeert dit allergeen in de ingrediëntenlijst',
+  suspected: 'Gevonden in de ingrediëntentekst, maar niet door Picnic gemarkeerd',
+};
+
 function factsHtml(d) {
   const out = [];
   if (d.organic) {
     out.push('<img src="/icons/eu-organic.svg" alt="Biologisch"'
       + ' title="Het product wordt op de Picnic-pagina als biologisch aangeduid">');
+  }
+  for (const allergen of d.allergens ?? []) {
+    const label = ALLERGEN_LABELS[allergen.group];
+    if (!label) continue;
+    const cls = allergen.declared ? 'allergen declared' : 'allergen';
+    const title = allergen.declared ? ALLERGEN_TITLES.declared : ALLERGEN_TITLES.suspected;
+    out.push(`<span class="${cls}" title="${title}">${label} ${allergen.declared ? '✓' : '?'}</span>`);
   }
   if (typeof d.saltGramsPer100 === 'number') {
     const g = d.saltGramsPer100;
