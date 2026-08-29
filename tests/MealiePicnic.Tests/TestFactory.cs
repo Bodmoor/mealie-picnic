@@ -10,10 +10,11 @@ namespace MealiePicnic.Tests;
 
 internal static class TestFactory
 {
-    public static AppOptions Options(string? dataDir = null, bool oidcEnabled = false) =>
+    public static AppOptions Options(string? dataDir = null, bool oidcEnabled = false, string? country = null) =>
         AppOptions.FromConfiguration(new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
+                ["PICNIC_COUNTRY"] = country,
                 ["MEALIE_URL"] = "https://mealie.test",
                 ["MEALIE_TOKEN"] = "mealie-token",
                 ["MEALIE_LIST"] = "Boodschappen",
@@ -28,8 +29,14 @@ internal static class TestFactory
     public static MealieClient Mealie(StubHandler handler, AppOptions? options = null) =>
         new(new HttpClient(handler), options ?? Options());
 
+    /// <summary>
+    /// Pass <paramref name="cache"/> to share one cache between two clients --
+    /// which is what the real app does, since IMemoryCache is a singleton. Each
+    /// call gets its own cache otherwise, so tests stay isolated by default.
+    /// </summary>
     public static PicnicClient Picnic(
-        StubHandler handler, AppOptions? options = null, TokenStore? tokens = null, ClaimsPrincipal? user = null)
+        StubHandler handler, AppOptions? options = null, TokenStore? tokens = null,
+        ClaimsPrincipal? user = null, IMemoryCache? cache = null)
     {
         var opts = options ?? Options();
         var accessor = new HttpContextAccessor
@@ -40,7 +47,7 @@ internal static class TestFactory
             new HttpClient(handler),
             opts,
             tokens ?? new TokenStore(opts, NullLogger<TokenStore>.Instance),
-            new MemoryCache(new MemoryCacheOptions()),
+            cache ?? new MemoryCache(new MemoryCacheOptions()),
             accessor,
             NullLogger<PicnicClient>.Instance);
     }

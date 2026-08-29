@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Text.Json.Nodes;
 using MealiePicnic.Clients;
 using MealiePicnic.Storage;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace MealiePicnic.Tests;
@@ -45,6 +46,10 @@ public class PicnicClientTests
         if (seed is not null) store.Save(seed);
         return store;
     }
+
+    /// <summary>A second storefront, for asserting that cache keys separate them.</summary>
+    private static AppOptions Germany() =>
+        TestFactory.Options(country: "DE");
 
     [Fact]
     public async Task Search_collects_selling_units_in_relevance_order()
@@ -91,6 +96,60 @@ public class PicnicClientTests
         await client.SearchAsync("wrap", default);
 
         Assert.Single(handler.Sent);
+    }
+
+    [Fact]
+    public async Task Search_results_are_not_served_to_a_caller_without_a_token()
+    {
+        // IMemoryCache is a singleton shared by every user, and the search entry
+        // is deliberately shared with it -- a household orders from one address.
+        // What must not be shared is the *authorisation*: before this, the cache
+        // hit returned before any request was built, so someone not signed in to
+        // Picnic saw a full grid and only found out at basket time.
+        var handler = new StubHandler().OnJson("search-page-results", SearchPage);
+        var cache = new MemoryCache(new MemoryCacheOptions());
+
+        await TestFactory.Picnic(handler, tokens: Tokens("tok"), cache: cache)
+            .SearchAsync("wrap", default);
+
+        // Same cache, same term, but this caller has no token at all.
+        await TestFactory.Picnic(handler, tokens: Tokens(), cache: cache)
+            .SearchAsync("wrap", default);
+
+        Assert.Equal(2, handler.Sent.Count);
+    }
+
+    [Fact]
+    public async Task Search_results_are_shared_between_callers_who_do_have_tokens()
+    {
+        // The other half of the contract: the entry really is shared, so the
+        // token check above did not quietly turn the cache off.
+        var handler = new StubHandler().OnJson("search-page-results", SearchPage);
+        var cache = new MemoryCache(new MemoryCacheOptions());
+
+        await TestFactory.Picnic(handler, tokens: Tokens("tok-a"), cache: cache)
+            .SearchAsync("wrap", default);
+        await TestFactory.Picnic(handler, tokens: Tokens("tok-b"), cache: cache)
+            .SearchAsync("wrap", default);
+
+        Assert.Single(handler.Sent);
+    }
+
+    [Fact]
+    public async Task Search_cache_keys_carry_the_country()
+    {
+        // Nothing changes today -- only NL ships, #12 is shelved -- but the
+        // storefront an answer came from is part of what the answer means, and a
+        // key that omits it would silently collide the day a second one lands.
+        var handler = new StubHandler().OnJson("search-page-results", SearchPage);
+        var cache = new MemoryCache(new MemoryCacheOptions());
+
+        await TestFactory.Picnic(handler, TestFactory.Options(), Tokens("tok"), cache: cache)
+            .SearchAsync("wrap", default);
+        await TestFactory.Picnic(handler, Germany(), Tokens("tok"), cache: cache)
+            .SearchAsync("wrap", default);
+
+        Assert.Equal(2, handler.Sent.Count);
     }
 
     [Fact]

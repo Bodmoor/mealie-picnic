@@ -177,10 +177,31 @@ public sealed class PicnicClient(
 
     // ------------------------------------------------------------------ catalog
 
+    /// <summary>
+    /// Search the catalogue. Cached per term for SEARCH_CACHE_MINUTES.
+    ///
+    /// The key carries the country because the storefront it came from is part of
+    /// what the answer means -- today only NL ships (#12 is shelved), so this
+    /// changes nothing now and cannot collide later.
+    ///
+    /// The entry is shared between users on purpose: a household orders from one
+    /// address, so re-fetching per person would cost most of the hit rate for an
+    /// identical answer. But a cache hit is served only to a caller who actually
+    /// holds a Picnic token. Without that check the hit returned before any
+    /// request was built, so someone not signed in to Picnic saw a full grid of
+    /// results and only discovered otherwise when the basket failed. HasToken is
+    /// a local dictionary read, so this costs nothing upstream.
+    ///
+    /// Known limit, recorded rather than guessed at: if Picnic varies price or
+    /// availability by account or delivery area, a shared entry would carry one
+    /// household's answer to another. Not verified against their API, and not
+    /// paid for speculatively -- partitioning the key by household is a one-line
+    /// change if it ever proves real.
+    /// </summary>
     public async Task<List<PicnicProduct>> SearchAsync(string term, CancellationToken ct)
     {
-        var key = $"search:{term.ToLowerInvariant()}";
-        if (cache.TryGetValue(key, out List<PicnicProduct>? hit) && hit is not null)
+        var key = $"search:{options.PicnicCountry.ToLowerInvariant()}:{term.ToLowerInvariant()}";
+        if (HasToken && cache.TryGetValue(key, out List<PicnicProduct>? hit) && hit is not null)
             return hit;
 
         var path = $"/pages/search-page-results?search_term={Uri.EscapeDataString(term)}";
