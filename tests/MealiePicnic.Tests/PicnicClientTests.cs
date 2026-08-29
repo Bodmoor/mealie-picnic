@@ -723,6 +723,32 @@ public class PicnicClientTests
         Assert.DoesNotContain(details.Allergens, a => a.Group == AllergenGroups.Nuts);
     }
 
+    [Fact]
+    public async Task Details_survive_a_restart_without_refetching_the_product_page()
+    {
+        // The reason the store exists. A deploy empties the in-process cache, and
+        // a grid of ninety cards would otherwise re-fetch ninety product pages.
+        // A fresh MemoryCache plus a fresh ProductFactsStore over the same
+        // DATA_DIR is what a restart looks like from here.
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var options = TestFactory.Options(dir);
+        var handler = new StubHandler().OnJson("product-details-page-root", ProductPage);
+
+        var before = new ProductFactsStore(options, NullLogger<ProductFactsStore>.Instance);
+        await TestFactory.Picnic(handler, options, Tokens("tok"), facts: before)
+            .GetDetailsAsync("s1000001", default);
+        before.Flush();
+
+        var after = new ProductFactsStore(options, NullLogger<ProductFactsStore>.Instance);
+        var details = await TestFactory.Picnic(handler, options, Tokens("tok"), facts: after)
+            .GetDetailsAsync("s1000001", default);
+
+        Assert.Single(handler.Sent);
+        Assert.Equal(0.11, details.SaltGramsPer100!.Value, 3);
+
+        try { Directory.Delete(dir, recursive: true); } catch { /* best effort */ }
+    }
+
     [Theory]
     [InlineData("s1000001/../../user")]
     [InlineData("s1 000001")]

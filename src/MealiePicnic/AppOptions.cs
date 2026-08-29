@@ -45,6 +45,21 @@ public sealed class AppOptions
     public int SearchCacheMinutes { get; init; } = 30;
 
     /// <summary>
+    /// How long organic, salt and allergen facts are kept for one product, in
+    /// hours. A week by default: the facts barely change, and since they now
+    /// survive a restart there is no reason to re-fetch a product page daily.
+    ///
+    /// Bounded rather than indefinite because of one case. A reformulated
+    /// product is what a long expiry gets wrong, and under the positive-only
+    /// display settled in #14 the two directions are not equal: a removed
+    /// allergen lingers as a false chip, which is annoying, while an added one
+    /// is simply missing, which is invisible. This is how long that can go
+    /// unseen. Raising it much past a month trades a real safety margin for
+    /// fetches that are already rare.
+    /// </summary>
+    public int ProductFactsTtlHours { get; init; } = 168;
+
+    /// <summary>
     /// Force the Secure flag on the session cookie (requires TLS, directly or via
     /// a trusted proxy). On by default -- HTTPS must be assumed, or a cookie meant
     /// to be TLS-only silently isn't. Set to false explicitly for plain-HTTP local
@@ -104,6 +119,7 @@ public sealed class AppOptions
             OidcClientSecret = Get("BOODSCHAPPEN_OIDC_CLIENT_SECRET"),
             DataDir = Get("DATA_DIR", "/data"),
             SearchCacheMinutes = int.TryParse(Get("SEARCH_CACHE_MINUTES"), out var m) ? m : 30,
+            ProductFactsTtlHours = int.TryParse(Get("PRODUCT_FACTS_TTL_HOURS"), out var f) && f > 0 ? f : 168,
             // Unset/unparsable defaults to true (HTTPS enforced) -- must be set to
             // the literal string "false" to opt out, e.g. for plain-HTTP local dev.
             CookieSecure = !bool.TryParse(Get("COOKIE_SECURE"), out var cs) || cs,

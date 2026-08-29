@@ -10,11 +10,14 @@ namespace MealiePicnic.Tests;
 
 internal static class TestFactory
 {
-    public static AppOptions Options(string? dataDir = null, bool oidcEnabled = false, string? country = null) =>
+    public static AppOptions Options(
+        string? dataDir = null, bool oidcEnabled = false, string? country = null,
+        int? productFactsTtlHours = null) =>
         AppOptions.FromConfiguration(new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["PICNIC_COUNTRY"] = country,
+                ["PRODUCT_FACTS_TTL_HOURS"] = productFactsTtlHours?.ToString(),
                 ["MEALIE_URL"] = "https://mealie.test",
                 ["MEALIE_TOKEN"] = "mealie-token",
                 ["MEALIE_LIST"] = "Boodschappen",
@@ -36,7 +39,7 @@ internal static class TestFactory
     /// </summary>
     public static PicnicClient Picnic(
         StubHandler handler, AppOptions? options = null, TokenStore? tokens = null,
-        ClaimsPrincipal? user = null, IMemoryCache? cache = null)
+        ClaimsPrincipal? user = null, IMemoryCache? cache = null, ProductFactsStore? facts = null)
     {
         var opts = options ?? Options();
         var accessor = new HttpContextAccessor
@@ -48,6 +51,7 @@ internal static class TestFactory
             opts,
             tokens ?? new TokenStore(opts, NullLogger<TokenStore>.Instance),
             cache ?? new MemoryCache(new MemoryCacheOptions()),
+            facts ?? new ProductFactsStore(opts, NullLogger<ProductFactsStore>.Instance),
             accessor,
             NullLogger<PicnicClient>.Instance);
     }

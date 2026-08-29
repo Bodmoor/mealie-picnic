@@ -29,6 +29,7 @@ public sealed class PicnicClient(
     AppOptions options,
     TokenStore tokens,
     IMemoryCache cache,
+    ProductFactsStore facts,
     IHttpContextAccessor accessor,
     ILogger<PicnicClient> log)
 {
@@ -268,6 +269,16 @@ public sealed class PicnicClient(
         if (cache.TryGetValue(key, out PicnicDetails? hit) && hit is not null)
             return hit;
 
+        // Second look, on disk. Memory is the fast path; this is what makes a
+        // deploy cheap, since the in-process cache starts empty every time and a
+        // grid of ninety cards would otherwise re-fetch ninety product pages.
+        // Facts are catalogue data, not per-account, so a shared store is right.
+        if (facts.Get(productId) is { } stored)
+        {
+            Remember(key, stored);
+            return stored;
+        }
+
         // Same rule as the image id: never build a path from an unvalidated value.
         if (!System.Text.RegularExpressions.Regex.IsMatch(productId, "^[A-Za-z0-9_-]{1,32}$"))
             throw new ArgumentException("Invalid product id.", nameof(productId));
@@ -278,14 +289,21 @@ public sealed class PicnicClient(
         var details = json is null ? new PicnicDetails(productId, false, null, null, [])
                                    : ReadDetails(productId, json, log);
 
-        cache.Set(key, details, new MemoryCacheEntryOptions
-        {
-            // Nutrition and certification do not change between deliveries.
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(12),
-            Size = 1024,
-        });
+        Remember(key, details);
+        facts.Put(details);
         return details;
     }
+
+    /// <summary>
+    /// Hold facts in memory for the same span the store keeps them on disk, so
+    /// the two layers cannot disagree about how old is too old.
+    /// </summary>
+    private void Remember(string key, PicnicDetails details) =>
+        cache.Set(key, details, new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(options.ProductFactsTtlHours),
+            Size = 1024,
+        });
 
     /// <summary>Parse a product page. Static and internal so tests can feed it a tree.</summary>
     internal static PicnicDetails ReadDetails(string productId, JsonNode page, ILogger log)

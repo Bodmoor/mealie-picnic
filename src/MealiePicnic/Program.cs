@@ -30,6 +30,7 @@ AppText.Current = AppText.For(options.Language);
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<TokenStore>();
 builder.Services.AddSingleton<HouseholdLinkStore>();
+builder.Services.AddSingleton<ProductFactsStore>();
 builder.Services.AddHttpContextAccessor();
 
 // Keep the key ring on the mounted volume. The default location is inside the
