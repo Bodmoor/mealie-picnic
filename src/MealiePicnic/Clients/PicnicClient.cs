@@ -254,7 +254,7 @@ public sealed class PicnicClient(
         var path = $"/pages/product-details-page-root?id={Uri.EscapeDataString(productId)}";
         var json = await SendAsync(Build(HttpMethod.Get, path), ct);
 
-        var details = json is null ? new PicnicDetails(productId, false, null, null)
+        var details = json is null ? new PicnicDetails(productId, false, null, null, [])
                                    : ReadDetails(productId, json, log);
 
         cache.Set(key, details, new MemoryCacheEntryOptions
@@ -310,7 +310,7 @@ public sealed class PicnicClient(
             // Worth a warning: it means Picnic changed their page and both features
             // are silently off until the node ids here are updated.
             log.LogWarning("Product page for {Id} had none of the expected blocks", productId);
-            return new PicnicDetails(productId, false, null, null);
+            return new PicnicDetails(productId, false, null, null, []);
         }
 
         // Falls back to every accordion section, not just the one titled
@@ -321,11 +321,21 @@ public sealed class PicnicClient(
         // word, immediately followed by a per-100g-shaped amount) is specific
         // enough that scanning ingredients/allergen text alongside it is safe.
         var salt = ProductFacts.ParseSalt(nutrition) ?? ProductFacts.ParseSalt(accordionAll);
+
+        // Allergens are read from the accordion only (issue #14): the ingredient
+        // and allergy sections are where a declaration lives. The marketing
+        // blocks above are deliberately excluded -- "heerlijk bij een glas melk"
+        // in a description is not an ingredient, and the same blocks are the ones
+        // that can carry a neighbouring product's name.
+        //
+        // Passed the raw fragments, before Clean() has run: the bold markers are
+        // the whole signal separating a declared allergen from a word we spotted.
         return new PicnicDetails(
             Id: productId,
             Organic: ProductFacts.IsOrganic(claims),
             SaltGramsPer100: salt?.Grams,
-            SaltText: salt?.Text);
+            SaltText: salt?.Text,
+            Allergens: ProductFacts.ReadAllergens(accordionAll));
     }
 
     /// <summary>Depth-first search for the node carrying a given "id".</summary>

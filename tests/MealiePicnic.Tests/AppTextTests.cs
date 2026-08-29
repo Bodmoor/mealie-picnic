@@ -1,4 +1,5 @@
 using System.Text.Json;
+using MealiePicnic.Clients;
 using MealiePicnic.Presentation;
 
 namespace MealiePicnic.Tests;
@@ -101,6 +102,7 @@ public class AppTextTests
             "enterEmail", "enterPassword", "loginFailed", "chooseChannel", "requestingCode",
             "codeSentVia", "emailChannelName", "couldNotSendCode", "verificationFailed",
             "organicAlt", "organicTitle", "saltTitle", "saltUnit",
+            "allergenDeclared", "allergenSuspected",
         ];
 
         foreach (var text in new[] { AppText.Dutch, AppText.English })
@@ -110,6 +112,26 @@ public class AppTextTests
             {
                 Assert.True(client.TryGetProperty(key, out var value), $"{text.Lang}: missing '{key}'");
                 Assert.False(string.IsNullOrWhiteSpace(value.GetString()), $"{text.Lang}: blank '{key}'");
+            }
+        }
+    }
+
+    [Fact]
+    public void Client_json_carries_a_label_for_every_allergen_group_the_server_sends()
+    {
+        // app.js looks the label up by the group key and skips anything it has no
+        // label for, so a group added server-side without a label here would go
+        // silently missing from the card rather than fail loudly (issue #14).
+        string[] groups = [AllergenGroups.Nuts, AllergenGroups.Milk];
+
+        foreach (var text in new[] { AppText.Dutch, AppText.English })
+        {
+            var labels = JsonDocument.Parse(text.ClientJson()).RootElement.GetProperty("allergenLabels");
+
+            foreach (var group in groups)
+            {
+                Assert.True(labels.TryGetProperty(group, out var label), $"{text.Lang}: no label for '{group}'");
+                Assert.False(string.IsNullOrWhiteSpace(label.GetString()), $"{text.Lang}: blank label for '{group}'");
             }
         }
     }

@@ -288,10 +288,27 @@ document.addEventListener('alpine:init', () => {
 // The strings here come from the #i18n block, but the escaping rule is unchanged:
 // everything interpolated below is our own endpoint's booleans and numbers, or a
 // translation we wrote, never product text from Picnic.
+//
+// That still holds for the allergen chips (issue #14) now that their labels are
+// translated: the label is looked up by the group key rather than taken from the
+// response, so nothing from the wire reaches the markup. A group the server knows
+// and this build has no label for is skipped rather than rendered raw.
+//
+// A tick means Picnic marked the allergen itself, in the emphasis EU labelling
+// requires. A question mark means our own word list matched ordinary ingredient
+// text. They are different claims and the card must not blur them.
 function factsHtml(d) {
   const out = [];
   if (d.organic) {
     out.push(`<img src="/icons/eu-organic.svg" alt="${t('organicAlt')}" title="${t('organicTitle')}">`);
+  }
+  const labels = strings.allergenLabels ?? {};
+  for (const allergen of d.allergens ?? []) {
+    const label = labels[allergen.group];
+    if (!label) continue;
+    const cls = allergen.declared ? 'allergen declared' : 'allergen';
+    const title = allergen.declared ? t('allergenDeclared') : t('allergenSuspected');
+    out.push(`<span class="${cls}" title="${title}">${label} ${allergen.declared ? '✓' : '?'}</span>`);
   }
   if (typeof d.saltGramsPer100 === 'number') {
     const g = d.saltGramsPer100;

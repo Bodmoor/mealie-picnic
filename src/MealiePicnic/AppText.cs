@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using MealiePicnic.Clients;
 
 namespace MealiePicnic;
 
@@ -184,6 +185,28 @@ public sealed record AppText
     public required string JsSaltTitle { get; init; }
     public required string JsSaltUnit { get; init; }
 
+    // Allergen chips (issue #14). The labels are keyed by the group name the
+    // server sends, so app.js can look one up without ever writing a value from
+    // the response into the markup.
+    public required string AllergenNuts { get; init; }
+
+    public required string AllergenMilk { get; init; }
+    public required string AllergenDeclaredTitle { get; init; }
+    public required string AllergenSuspectedTitle { get; init; }
+
+    // --------------------------------------------------- allergen explanation
+
+    /// <summary>
+    /// The line under the results grid, split around the two marks it names.
+    /// Said once rather than per card, and worded so it never claims a product is
+    /// free of anything -- a card with no chip may equally be a page that could
+    /// not be read.
+    /// </summary>
+    public required string AllergenNoteBeforeTick { get; init; }
+
+    public required string AllergenNoteBeforeQuestion { get; init; }
+    public required string AllergenNoteAfter { get; init; }
+
     /// <summary>
     /// The two-part "not set in configuration" notice, split around the list of
     /// missing keys that app.js builds.
@@ -222,6 +245,15 @@ public sealed record AppText
         organicTitle = JsOrganicTitle,
         saltTitle = JsSaltTitle,
         saltUnit = JsSaltUnit,
+        // Keyed by the group name PicnicDetails sends, so app.js looks a label up
+        // rather than rendering anything that came off the wire.
+        allergenLabels = new Dictionary<string, string>
+        {
+            [AllergenGroups.Nuts] = AllergenNuts,
+            [AllergenGroups.Milk] = AllergenMilk,
+        },
+        allergenDeclared = AllergenDeclaredTitle,
+        allergenSuspected = AllergenSuspectedTitle,
     });
 
     /// <summary>
@@ -348,6 +380,18 @@ public sealed record AppText
         JsOrganicTitle = "Het product wordt op de Picnic-pagina als biologisch aangeduid",
         JsSaltTitle = "Zout per 100 g",
         JsSaltUnit = "g zout",
+
+        AllergenNuts = "noten",
+        AllergenMilk = "melk",
+        AllergenDeclaredTitle = "Picnic markeert dit allergeen in de ingrediëntenlijst",
+        AllergenSuspectedTitle = "Gevonden in de ingrediëntentekst, maar niet door Picnic gemarkeerd",
+
+        AllergenNoteBeforeTick = "Allergenen komen van de Picnic-productpagina. ",
+        AllergenNoteBeforeQuestion = " betekent dat Picnic het allergeen zelf markeert, ",
+        AllergenNoteAfter =
+            " dat wij het woord in de ingrediënten vonden. " +
+            "Geen label betekent niet dat het product vrij is van dat allergeen.",
+
         JsMissingConfigBefore = "Niet ingesteld in de configuratie: ",
         JsMissingConfigAfter = ". Vul aan; er wordt niets opgeslagen, alleen het token wordt bewaard.",
 
@@ -452,6 +496,18 @@ public sealed record AppText
         JsOrganicTitle = "Picnic's product page describes this product as organic",
         JsSaltTitle = "Salt per 100 g",
         JsSaltUnit = "g salt",
+
+        AllergenNuts = "nuts",
+        AllergenMilk = "milk",
+        AllergenDeclaredTitle = "Picnic marks this allergen in the ingredient list",
+        AllergenSuspectedTitle = "Found in the ingredient text, but not marked by Picnic",
+
+        AllergenNoteBeforeTick = "Allergens come from Picnic's product page. ",
+        AllergenNoteBeforeQuestion = " means Picnic marks the allergen itself, ",
+        AllergenNoteAfter =
+            " that we found the word in the ingredients. " +
+            "No label does not mean the product is free of that allergen.",
+
         JsMissingConfigBefore = "Not set in the configuration: ",
         JsMissingConfigAfter = ". Fill these in; nothing is stored, only the token is kept.",
 

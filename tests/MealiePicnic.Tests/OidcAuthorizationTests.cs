@@ -13,6 +13,7 @@ namespace MealiePicnic.Tests;
 /// itself is ASP.NET Core's own well-tested code, so these tests short-circuit
 /// discovery with a static Configuration instead of reaching a real Authentik.
 /// </summary>
+[Collection(AppTextCollection.Name)]
 public class OidcAuthorizationTests
 {
     private const string Password = "correct-horse-battery-staple";

@@ -11,6 +11,7 @@ namespace MealiePicnic.Tests;
 /// the TestServer does not set, so all requests in one factory share a partition —
 /// a shared factory would leak rate-limit state between tests.
 /// </summary>
+[Collection(AppTextCollection.Name)]
 public class AuthorizationTests
 {
     private const string Password = "correct-horse-battery-staple";

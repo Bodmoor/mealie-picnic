@@ -122,12 +122,22 @@ public static class Html
           .card .p { font-size:12px; color:#9aa0a6; margin-top:6px }
           .card .p b { color:#e8eaed }
           /* Product facts (issue #6): reserve the height so cards do not jump
-             when the lazily fetched leaf and salt figure arrive. */
-          .card .f { min-height:19px; margin-top:5px; display:flex; align-items:center; gap:6px }
+             when the lazily fetched leaf and salt figure arrive. Wraps since the
+             allergen chips joined the row (issue #14) -- a card can now carry the
+             leaf, two chips and the salt figure. */
+          .card .f { min-height:19px; margin-top:5px; display:flex; align-items:center;
+                     flex-wrap:wrap; gap:6px 6px }
           .card .f img { width:auto; height:15px; margin:0; background:none; border-radius:2px }
           .salt { font-size:11.5px; color:#9aa0a6 }
           .salt.hi { color:#e0a2a2 }
           .salt.lo { color:#8fbf9a }
+          /* Allergens (issue #14). The quieter style is the uncertain one: our
+             word list matched, but Picnic did not mark it. The louder style is
+             Picnic's own declaration. */
+          .allergen { font-size:11.5px; padding:0 6px; border-radius:20px;
+                      border:1px solid #5a4d20; color:#c9a227; white-space:nowrap }
+          .allergen.declared { border-color:#7a3f3f; color:#e0a2a2 }
+          .allergen-note { margin:14px 0 0 }
           pre { background:#111316; border:1px solid #2a2d31; border-radius:9px; padding:13px;
                 overflow:auto; max-height:440px; font-size:12px; color:#c9cdd2 }
           .row { display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap }
