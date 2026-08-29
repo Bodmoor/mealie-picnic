@@ -291,17 +291,26 @@ public sealed class PicnicClient(
         // ("biologische tarwebloem" in an ingredient list means what it says).
         var nutrition = new List<string>();
         var accordionAll = new List<string>();
+        var ingredients = new List<string>();
+        var accordionSections = 0;
         if (FindById(page, "accordion-list") is { } accordion)
         {
             found = true;
             foreach (var (title, body) in Sections(accordion))
             {
+                accordionSections++;
                 accordionAll.AddRange(body);
                 if (title.Contains("voedingswaarde", StringComparison.OrdinalIgnoreCase) ||
                     title.Contains("nutrition", StringComparison.OrdinalIgnoreCase))
                     nutrition.AddRange(body);
                 else
                     claims.AddRange(body);
+
+                // Allergens come from these sections alone (issue #45). The
+                // accordion is not all ingredient text: it also carries a
+                // description, and "heerlijk bij een glas melk" in prose put a
+                // milk chip on a product whose ingredient list had no dairy in it.
+                if (IsIngredientSection(title)) ingredients.AddRange(body);
             }
         }
 
@@ -322,20 +331,35 @@ public sealed class PicnicClient(
         // enough that scanning ingredients/allergen text alongside it is safe.
         var salt = ProductFacts.ParseSalt(nutrition) ?? ProductFacts.ParseSalt(accordionAll);
 
-        // Allergens are read from the accordion only (issue #14): the ingredient
-        // and allergy sections are where a declaration lives. The marketing
-        // blocks above are deliberately excluded -- "heerlijk bij een glas melk"
-        // in a description is not an ingredient, and the same blocks are the ones
-        // that can carry a neighbouring product's name.
+        // Allergens come from the ingredient and allergy sections only -- not the
+        // whole accordion, which is what #14 shipped and #45 corrects.
+        //
+        // Note this is the opposite choice from salt directly above, and
+        // deliberately so. Salt widens to every section because a missed figure
+        // is a small annoyance and ParseSalt's own label regex is specific enough
+        // to be safe anywhere. An allergen chip is the other way round: under
+        // positive-only display a chip that should not be there is a lie on the
+        // card, so narrowing beats reaching. The cost is accepted: if Picnic
+        // renames the section, allergens go quiet rather than wrong.
         //
         // Passed the raw fragments, before Clean() has run: the bold markers are
         // the whole signal separating a declared allergen from a word we spotted.
+        if (accordionSections > 0 && ingredients.Count == 0)
+        {
+            // Debug, not a warning: plenty of products (loose produce, say) have
+            // no ingredient section at all, so this is ordinary per product. It
+            // would only be a signal in aggregate, and logging is the wrong
+            // instrument for that -- the fixture tests are what guard the section
+            // wordings we know about.
+            log.LogDebug("Product page for {Id} had an accordion but no ingredient section", productId);
+        }
+
         return new PicnicDetails(
             Id: productId,
             Organic: ProductFacts.IsOrganic(claims),
             SaltGramsPer100: salt?.Grams,
             SaltText: salt?.Text,
-            Allergens: ProductFacts.ReadAllergens(accordionAll));
+            Allergens: ProductFacts.ReadAllergens(ingredients));
     }
 
     /// <summary>Depth-first search for the node carrying a given "id".</summary>
@@ -381,6 +405,23 @@ public sealed class PicnicClient(
                 break;
         }
     }
+
+    /// <summary>
+    /// Is this accordion section the ingredient list, or an allergy notice?
+    ///
+    /// Matched on stems rather than whole titles, because the wording is Picnic's
+    /// and varies: "Ingredienten", "Ingrediënten" and "Allergie-informatie" have
+    /// all been seen, and the stems cover the spelling with and without the
+    /// diaeresis without a list of exact strings to keep in step.
+    ///
+    /// Kept deliberately narrow. A section this does not match contributes no
+    /// allergens at all, which is the point: the description sits in this same
+    /// accordion, and prose about what a product goes well with is not a
+    /// declaration of what is in it (issue #45).
+    /// </summary>
+    public static bool IsIngredientSection(string title) =>
+        title.Contains("ingredi", StringComparison.OrdinalIgnoreCase) ||
+        title.Contains("allerg", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The accordion's (header, body-text) pairs.</summary>
     private static IEnumerable<(string Title, List<string> Body)> Sections(JsonNode accordion)

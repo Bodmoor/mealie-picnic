@@ -194,10 +194,16 @@ POST /cart/add_product    {product_id, count}
   own word list matched ordinary text. A card with no chip is not a claim that the product
   is free of anything — it may equally be a page that could not be read, and the app never
   renders a "free from" claim anywhere. **Do not rely on this if someone's health depends
-  on it: read the packaging.** Two known limits: the emphasis rule is inferred from the
+  on it: read the packaging.** Three known limits. The emphasis rule is inferred from the
   labelling rules rather than confirmed against a captured product page (no fixture here
-  contains an allergen section), and whole-word matching means `amandelmelk` raises
-  neither chip on unemphasised text although almond is a tree nut.
+  contains an allergen section). Whole-word matching means `amandelmelk` raises
+  neither chip on unemphasised text although almond is a tree nut. And only accordion
+  sections whose title looks like ingredients or allergens are read at all — the
+  description sits in that same accordion, and reading it put a milk chip on a loaf whose
+  ingredients had no dairy (issue #45) — so if Picnic renames those sections the chips go
+  quiet rather than wrong. That is the opposite trade-off from salt, which deliberately
+  widens to every section: a missed salt figure is an annoyance, a wrong allergen chip is
+  a lie.
 * Quantities: a Mealie line's `quantity` only means "how many to buy" when the unit is
   countable (`stuks`, or no unit). For mass and volume the app buys one pack, unless the
   household's stored pack size is known and smaller than needed — 2 kg against 1 kg bags

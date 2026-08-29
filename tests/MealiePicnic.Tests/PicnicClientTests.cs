@@ -560,6 +560,92 @@ public class PicnicClientTests
             details.Allergens);
     }
 
+    // A page whose ingredient list carries no allergen, but whose description --
+    // in the same accordion, which is what made this a bug -- mentions one.
+    private const string PageWithChattyDescription = """
+        {
+          "layout": { "body": { "children": [
+            { "id": "product-details-page-root-main-container", "pml": { "component": {
+                "children": [ { "textType": "HEADER1", "markdown": "Roggebrood" } ] } } },
+            { "id": "accordion-list", "items": [
+                { "header": { "markdown": "**Ingredienten**" },
+                  "body": { "markdown": "Roggemeel, water, zout" } },
+                { "header": { "markdown": "**Omschrijving**" },
+                  "body": { "markdown": "Heerlijk bij een glas melk of met hazelnoten erbij." } },
+                { "header": { "markdown": "**Voedingswaarde**" },
+                  "body": { "children": [
+                      { "markdown": "Per 100 g" },
+                      { "markdown": "Zout" }, { "markdown": "1,1 g" }
+                  ] } }
+            ] }
+          ] } }
+        }
+        """;
+
+    [Fact]
+    public async Task Details_ignore_allergen_words_in_the_description_section()
+    {
+        // Issue #45. #14 read allergens from every accordion section, and the
+        // description sits in that accordion -- so prose about what a product
+        // goes well with put a milk chip on a loaf with no dairy in it. Under
+        // positive-only display that is a lie on the card, which is the one
+        // failure this feature must not have.
+        var handler = new StubHandler().OnJson("product-details-page-root", PageWithChattyDescription);
+
+        var details = await TestFactory.Picnic(handler, tokens: Tokens("tok"))
+            .GetDetailsAsync("s1000001", default);
+
+        Assert.Empty(details.Allergens);
+    }
+
+    [Fact]
+    public async Task Details_still_read_the_salt_from_a_page_whose_allergens_are_ignored()
+    {
+        // The narrowing is allergen-only: salt deliberately still widens to every
+        // section (issue #33), so scoping one must not quietly scope the other.
+        var handler = new StubHandler().OnJson("product-details-page-root", PageWithChattyDescription);
+
+        var details = await TestFactory.Picnic(handler, tokens: Tokens("tok"))
+            .GetDetailsAsync("s1000001", default);
+
+        Assert.Equal(1.1, details.SaltGramsPer100!.Value, 3);
+    }
+
+    [Theory]
+    [InlineData("**Ingredienten**")]
+    [InlineData("**Ingrediënten**")]
+    [InlineData("Ingrediënten en allergenen")]
+    [InlineData("**Allergie-informatie**")]
+    [InlineData("Allergenen")]
+    public async Task Details_recognise_the_section_wordings_picnic_uses(string header)
+    {
+        // The narrowing only works if the ingredient section is actually found.
+        // These are the wordings we know about; a title outside them means the
+        // allergens go quiet, which is the accepted cost of not being wrong.
+        var page = PageWithChattyDescription.Replace("**Ingredienten**", header)
+            .Replace("Roggemeel, water, zout", "Roggemeel, water, **melk**");
+        var handler = new StubHandler().OnJson("product-details-page-root", page);
+
+        var details = await TestFactory.Picnic(handler, tokens: Tokens("tok"))
+            .GetDetailsAsync("s1000001", default);
+
+        var milk = Assert.Single(details.Allergens);
+        Assert.Equal(AllergenGroups.Milk, milk.Group);
+        Assert.True(milk.Declared);
+    }
+
+    [Fact]
+    public void Section_titles_that_are_not_ingredients_are_not_treated_as_ingredients()
+    {
+        // Guarding the matcher directly, since a stem that matched too much would
+        // put the description back in scope and re-open issue #45.
+        foreach (var title in new[] { "Omschrijving", "Voedingswaarde", "Bereidingswijze", "Bewaren" })
+            Assert.False(PicnicClient.IsIngredientSection(title), title);
+
+        foreach (var title in new[] { "Ingredienten", "Ingrediënten", "Allergenen", "Allergie-informatie" })
+            Assert.True(PicnicClient.IsIngredientSection(title), title);
+    }
+
     [Fact]
     public async Task Details_do_not_take_allergens_from_a_suggested_alternative()
     {
