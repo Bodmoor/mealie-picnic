@@ -96,6 +96,7 @@ All via environment variables.
 | `PICNIC_USER`          | no*      | —              | *needed until a token is cached           |
 | `PICNIC_PASSWORD`      | no*      | —              |                                           |
 | `PICNIC_COUNTRY`       | no       | `NL`           | `NL`, `DE`, `FR`                          |
+| `LANGUAGE`             | no       | `nl`           | interface language: `nl` or `en` (`en-GB` and the like also select English). Independent of `PICNIC_COUNTRY` — the storefront stays whatever the country says, so an English interface on the Dutch storefront is a normal setup. Anything unrecognised falls back to Dutch. Also decides the decimal separator: `€2,69` / `1,2 g` in Dutch, `€2.69` / `1.2 g` in English |
 | `PICNIC_API_VERSION`   | no       | `15`           | bump if Picnic starts returning 400s      |
 | `SEARCH_CACHE_MINUTES` | no       | `30`           | in-memory cache for searches; product pages are held 12 h |
 | `DATA_DIR`             | no       | `/data`        | volume for the token and device id        |

@@ -1,7 +1,10 @@
 @inherits RazorSlice<BasketLogModel>
+@{
+    var t = AppText.Current;
+}
 @if (Model.Results.Count == 0)
 {
-    <div class="muted">Niets toegevoegd: geen gekoppelde items op deze lijst.</div>
+    <div class="muted">@t.BasketNothingLinked</div>
 }
 else
 {
@@ -13,21 +16,21 @@ else
                 &check; @r.Name x@r.Amount
                 @if (Model.CheckOff && !r.CheckedOff)
                 {
-                    <span class="muted">(in de kar, niet afgevinkt)</span>
+                    <span class="muted">@t.BasketInCartNotCheckedOff</span>
                 }
             </div>
         }
         else
         {
-            <div class="bad">&times; @r.Name: @r.Error <span class="muted">&mdash; blijft op de lijst</span></div>
+            <div class="bad">&times; @r.Name: @r.Error <span class="muted">&mdash; @t.BasketStaysOnList</span></div>
         }
     }
 }
 @if (Model.Aborted)
 {
-    <div class="bad">De aanvraag naar Picnic is mislukt; niets is toegevoegd.</div>
+    <div class="bad">@t.BasketRequestFailed</div>
 }
 @if (Model.Unmapped > 0)
 {
-    <div class="muted">@Model.Unmapped nog niet gekoppeld</div>
+    <div class="muted">@t.BasketNotLinkedYet(Model.Unmapped)</div>
 }

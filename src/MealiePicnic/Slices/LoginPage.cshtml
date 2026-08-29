@@ -1,7 +1,10 @@
 @inherits RazorSlice<bool>
-@{ var wrongPassword = Model; }
+@{
+    var t = AppText.Current;
+    var wrongPassword = Model;
+}
 <!doctype html>
-<html lang="nl"><meta charset="utf-8">
+<html lang="@t.Lang"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" href="/favicon.ico" type="image/png">
 <link rel="icon" href="/icons/192.png" sizes="192x192" type="image/png">
@@ -9,7 +12,7 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1d2024">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Inloggen</title>
+<title>@t.SignInTitle</title>
 <style>
   :root { color-scheme: dark }
   body { font:15px system-ui,sans-serif; background:#15171a; color:#e8eaed;
@@ -31,11 +34,11 @@
     <img src="/icons/192.png" width="40" height="40" alt="">
     <h1>Mealie &rarr; Picnic</h1>
   </div>
-  <input type="password" name="password" placeholder="Wachtwoord" autofocus>
-  <button type="submit">Inloggen</button>
+  <input type="password" name="password" placeholder="@t.PasswordPlaceholder" autofocus>
+  <button type="submit">@t.SignInSubmit</button>
   @if (wrongPassword)
   {
-      <p class="err">Onjuist wachtwoord</p>
+      <p class="err">@t.WrongPassword</p>
   }
 </form>
 </html>

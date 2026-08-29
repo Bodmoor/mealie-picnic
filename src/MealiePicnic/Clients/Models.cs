@@ -8,10 +8,18 @@ public sealed record PicnicProduct(
     string UnitQuantity,
     string ImageId)
 {
-    // Formatted invariantly on purpose: the display string must not depend on the
-    // host's culture (a nl-NL host would otherwise render "€2,69").
-    public string PriceText => DisplayPrice is { } c
-        ? string.Format(System.Globalization.CultureInfo.InvariantCulture, "€{0:0.00}", c / 100m)
+    // The host's culture must not decide this -- that was always the rule, and it
+    // is why this used to be formatted invariantly. What changed with issue #13 is
+    // who decides instead: the configured interface language, so Dutch reads
+    // "€2,69" and English "€2.69". The salt badge in app.js follows the same
+    // separator, which it did not before: it hard-coded a comma while this
+    // hard-coded a point, and one card showed both.
+    public string PriceText => PriceTextIn(AppText.Current);
+
+    /// <summary>The price in a given language -- the overload tests use, so they
+    /// can check both without reaching for the process-wide setting.</summary>
+    public string PriceTextIn(AppText text) => DisplayPrice is { } c
+        ? string.Format(text.Numbers, "€{0:0.00}", c / 100m)
         : "";
 }
 
@@ -63,18 +71,18 @@ public sealed record ShoppingItem(
     public int Amount => Quantities.Required(Quantity, Unit, PicnicPack);
 
     /// <summary>Short explanation of the amount, for the UI.</summary>
-    public string AmountReason
+    public string AmountReason => AmountReasonIn(AppText.Current);
+
+    /// <summary>The explanation in a given language, for tests.</summary>
+    public string AmountReasonIn(AppText text)
     {
-        get
-        {
-            if (Amount == 1 && Quantities.ResolveUnit(Unit).Dimension is not Dimension.Count)
-                return string.IsNullOrWhiteSpace(PicnicPack)
-                    ? "1 pak (geen pakgrootte bekend)"
-                    : $"1 x {PicnicPack}";
+        if (Amount == 1 && Quantities.ResolveUnit(Unit).Dimension is not Dimension.Count)
             return string.IsNullOrWhiteSpace(PicnicPack)
-                ? $"{Amount} x"
-                : $"{Amount} x {PicnicPack}";
-        }
+                ? text.AmountOnePackUnknownSize
+                : text.AmountOnePack(PicnicPack);
+        return string.IsNullOrWhiteSpace(PicnicPack)
+            ? text.AmountCount(Amount)
+            : text.AmountCountOfPack(Amount, PicnicPack);
     }
 }
 

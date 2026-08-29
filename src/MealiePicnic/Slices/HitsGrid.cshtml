@@ -1,17 +1,18 @@
 @inherits RazorSlice<HitsModel>
 @using System.Text.Json
 @{
+    var t = AppText.Current;
     var it = Model.Item;
     var products = Model.Products;
     var stillLinked = !string.IsNullOrEmpty(it.PicnicUid) && products.All(p => p.Id != it.PicnicUid);
 }
 @if (stillLinked)
 {
-    <p class="muted">Huidige koppeling <b>@it.PicnicUid</b> staat niet in deze resultaten.</p>
+    <p class="muted">@t.LinkNotInResultsBefore<b>@it.PicnicUid</b>@t.LinkNotInResultsAfter</p>
 }
 @if (products.Count == 0)
 {
-    <p class="muted">Geen resultaten.</p>
+    <p class="muted">@t.NoResults</p>
 }
 else
 {
@@ -44,7 +45,7 @@ else
                 }
                 @if (isLinked)
                 {
-                    <div class="badge">&check; gekoppeld</div>
+                    <div class="badge">&check; @t.TagLinked</div>
                 }
                 <div class="n">@p.Name</div>
                 <div class="p"><b>@p.PriceText</b> @p.UnitQuantity</div>

@@ -9,19 +9,54 @@ namespace MealiePicnic.Presentation;
 /// </summary>
 public static class Html
 {
-    // Computed once, not const: the raw template's script URLs get a
-    // ?v={content hash} appended (see Vendor.cs) so a week-long client cache on
-    // /assets/{name} cannot keep serving a stale app.js past a deploy. Still one
-    // fixed string served identically to every request -- nothing here is
-    // per-request data.
-    public static readonly string AppPage = AppPageTemplate
+    private sealed record Rendered(AppText Text, string Html);
+
+    // Built once per language rather than per request: the shell carries no
+    // per-request data, and LANGUAGE is fixed for the process (see AppText). The
+    // holder is a single reference so a racing reader sees a matched
+    // text/markup pair rather than one from each side.
+    private static Rendered? rendered;
+
+    /// <summary>The shell in the configured language (issue #13).</summary>
+    public static string AppPage
+    {
+        get
+        {
+            var text = AppText.Current;
+            if (rendered is { } current && ReferenceEquals(current.Text, text))
+                return current.Html;
+
+            var built = new Rendered(text, PageFor(text));
+            rendered = built;
+            return built.Html;
+        }
+    }
+
+    /// <summary>
+    /// The shell in a given language. Public so tests can render both without
+    /// reaching for the process-wide setting.
+    ///
+    /// The raw template's script URLs get a ?v={content hash} appended (see
+    /// Vendor.cs) so a week-long client cache on /assets/{name} cannot keep
+    /// serving a stale app.js past a deploy.
+    /// </summary>
+    public static string PageFor(AppText text) => Template(text)
         .Replace("/assets/htmx.min.js", $"/assets/htmx.min.js?v={Vendor.HtmxVersion}")
         .Replace("/assets/alpine-csp.min.js", $"/assets/alpine-csp.min.js?v={Vendor.AlpineCspVersion}")
         .Replace("/assets/app.js", $"/assets/app.js?v={Vendor.AppJsVersion}");
 
-    private const string AppPageTemplate = """
+    // $$""" so the CSS keeps its single braces and only {{...}} interpolates.
+    //
+    // The #i18n block is a data block, not a script: its type is not a JavaScript
+    // MIME type, so the browser never prepares it for execution and the strict
+    // script-src (no 'unsafe-inline', see Program.cs) does not apply to it. That
+    // is what lets app.js have translated strings without either inlining
+    // executable JS or spending a round trip on a /api/strings fetch. The JSON is
+    // serialized with the HTML-escaping encoder, so a value containing
+    // "</script>" cannot close the block.
+    private static string Template(AppText text) => $$"""
         <!doctype html>
-        <html lang="nl"><meta charset="utf-8">
+        <html lang="{{text.Lang}}"><meta charset="utf-8">
         <meta name="viewport" content="width=device-width,initial-scale=1">
         <link rel="icon" href="/favicon.ico" type="image/png">
         <link rel="icon" href="/icons/192.png" sizes="192x192" type="image/png">
@@ -117,44 +152,46 @@ public static class Html
                        font-size:20px }
         </style>
 
-        <a class="brand" href="/" title="Terug naar de lijst">
+        <script type="application/json" id="i18n">{{text.ClientJson()}}</script>
+
+        <a class="brand" href="/" title="{{text.BrandHomeTitle}}">
           <img src="/icons/192.png" width="34" height="34" alt="">
           <h1>Mealie &rarr; Picnic</h1>
         </a>
         <div class="muted" x-data x-init="$store.picnic.refresh(); $store.me.refresh()" x-cloak>
-          <span x-show="$store.picnic.authenticated">Picnic: <b class="ok">ingelogd</b>
-            <a href="#" x-on:click.prevent="$store.picnic.logout()">uitloggen</a></span>
-          <span x-show="!$store.picnic.authenticated">Picnic: <b class="bad">niet ingelogd</b>
-            <a href="#" x-on:click.prevent="$store.picnic.promptLogin()">inloggen</a></span>
+          <span x-show="$store.picnic.authenticated">{{text.PicnicLabel}}: <b class="ok">{{text.PicnicSignedIn}}</b>
+            <a href="#" x-on:click.prevent="$store.picnic.logout()">{{text.PicnicSignOut}}</a></span>
+          <span x-show="!$store.picnic.authenticated">{{text.PicnicLabel}}: <b class="bad">{{text.PicnicSignedOut}}</b>
+            <a href="#" x-on:click.prevent="$store.picnic.promptLogin()">{{text.PicnicSignIn}}</a></span>
           &middot;
           <form method="post" action="/logout" style="display:inline">
-            <button type="submit" class="linklike">afmelden<span x-show="$store.me.label"> (<span x-text="$store.me.label"></span>)</span> bij deze app</button>
+            <button type="submit" class="linklike">{{text.AppSignOutBefore}}<span x-show="$store.me.label"> (<span x-text="$store.me.label"></span>)</span>{{text.AppSignOutAfter}}</button>
           </form>
         </div>
 
         <div id="view" hx-get="/api/list" hx-trigger="load" hx-swap="outerHTML">
-          <p class="muted">Laden...</p>
+          <p class="muted">{{text.Loading}}</p>
         </div>
 
         <dialog id="creds">
-          <b>Picnic inloggen</b>
+          <b>{{text.CredsTitle}}</b>
           <p class="muted" id="credsMsg"></p>
-          <input id="cuser" placeholder="E-mailadres" autocomplete="username">
+          <input id="cuser" placeholder="{{text.CredsEmailPlaceholder}}" autocomplete="username">
           <input id="cpass" type="password" autocomplete="current-password">
           <div class="bar" x-data>
-            <button class="primary" x-on:click="$store.picnic.submitCreds()">Inloggen</button>
-            <button x-on:click="$store.picnic.closeCreds()">Sluiten</button>
+            <button class="primary" x-on:click="$store.picnic.submitCreds()">{{text.CredsSubmit}}</button>
+            <button x-on:click="$store.picnic.closeCreds()">{{text.DialogClose}}</button>
           </div>
         </dialog>
 
         <dialog id="twofa">
-          <b>Picnic 2FA</b>
-          <p class="muted" id="twofaMsg">Kies waar de code naartoe moet.</p>
+          <b>{{text.TwoFactorTitle}}</b>
+          <p class="muted" id="twofaMsg">{{text.TwoFactorChooseChannel}}</p>
           <div class="bar" x-data>
-            <button data-channel="SMS" data-label="SMS"
-                    x-on:click="$store.picnic.send2fa('SMS')">SMS</button>
-            <button data-channel="EMAIL" data-label="E-mail"
-                    x-on:click="$store.picnic.send2fa('EMAIL')">E-mail</button>
+            <button data-channel="SMS" data-label="{{text.ChannelSms}}"
+                    x-on:click="$store.picnic.send2fa('SMS')">{{text.ChannelSms}}</button>
+            <button data-channel="EMAIL" data-label="{{text.ChannelEmail}}"
+                    x-on:click="$store.picnic.send2fa('EMAIL')">{{text.ChannelEmail}}</button>
           </div>
           <div class="otp" x-data>
             <input class="otpcell" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code"
@@ -172,8 +209,8 @@ public static class Html
           </div>
           <input type="hidden" id="otp">
           <div class="bar" x-data>
-            <button class="primary" x-on:click="$store.picnic.verify2fa()">Verifieren</button>
-            <button x-on:click="$store.picnic.closeTwofa()">Sluiten</button>
+            <button class="primary" x-on:click="$store.picnic.verify2fa()">{{text.TwoFactorVerify}}</button>
+            <button x-on:click="$store.picnic.closeTwofa()">{{text.DialogClose}}</button>
           </div>
         </dialog>
 

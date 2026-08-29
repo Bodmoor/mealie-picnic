@@ -45,14 +45,20 @@ public static class Icons
     /// Web app manifest. Served from a route (not a file) so it can be marked
     /// AllowAnonymous: Android fetches it before the user has logged in, and a
     /// 302-to-login would make the app look uninstallable.
+    ///
+    /// Localized (issue #13) even though it is fetched anonymously: LANGUAGE is a
+    /// property of the deployment, not of the caller, so there is no per-user
+    /// choice to be wrong about. The name is the product lockup and stays put.
     /// </summary>
-    public const string Manifest = """
+    public static string Manifest => ManifestFor(AppText.Current);
+
+    public static string ManifestFor(AppText text) => $$"""
         {
           "id": "/",
           "name": "Mealie → Picnic",
-          "short_name": "Boodschappen",
-          "description": "Koppel Mealie-boodschappen aan Picnic-producten en vul de kar.",
-          "lang": "nl",
+          "short_name": "{{text.AppShortName}}",
+          "description": "{{text.AppDescription}}",
+          "lang": "{{text.Lang}}",
           "start_url": "/",
           "scope": "/",
           "display": "standalone",

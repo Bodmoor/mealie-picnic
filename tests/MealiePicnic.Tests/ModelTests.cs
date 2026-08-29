@@ -1,3 +1,4 @@
+using System.Globalization;
 using MealiePicnic.Clients;
 
 namespace MealiePicnic.Tests;
@@ -23,14 +24,54 @@ public class ModelTests
     public void Amount_never_drops_below_one(double quantity, string unit, int expected) =>
         Assert.Equal(expected, Item(quantity, unit).Amount);
 
+    // Dutch is the default language, so the separator here is a comma (issue #13).
+    // It used to be a point, formatted invariantly, while the salt badge next to
+    // it on the same card used a comma.
+    [Theory]
+    [InlineData(269, "€2,69")]
+    [InlineData(95, "€0,95")]
+    [InlineData(1799, "€17,99")]
+    public void PriceText_formats_cents(int cents, string expected) =>
+        Assert.Equal(expected, new PicnicProduct("s1", "x", cents, "", "").PriceText);
+
     [Theory]
     [InlineData(269, "€2.69")]
     [InlineData(95, "€0.95")]
     [InlineData(1799, "€17.99")]
-    public void PriceText_formats_cents(int cents, string expected) =>
-        Assert.Equal(expected, new PicnicProduct("s1", "x", cents, "", "").PriceText);
+    public void PriceText_uses_a_point_in_english(int cents, string expected) =>
+        Assert.Equal(expected, new PicnicProduct("s1", "x", cents, "", "").PriceTextIn(AppText.English));
 
     [Fact]
     public void PriceText_is_blank_when_price_unknown() =>
         Assert.Equal("", new PicnicProduct("s1", "x", null, "", "").PriceText);
+
+    // The host's culture must not reach the output: that was the original rule
+    // behind formatting invariantly, and swapping in a chosen language must not
+    // have quietly given it back. InvariantGlobalization means CurrentCulture is
+    // already invariant here, so this guards the intent rather than reproducing
+    // a nl-NL host, which the build cannot create.
+    [Fact]
+    public void PriceText_ignores_the_thread_culture()
+    {
+        var before = Thread.CurrentThread.CurrentCulture;
+        try
+        {
+            Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
+            Assert.Equal("€2,69", new PicnicProduct("s1", "x", 269, "", "").PriceTextIn(AppText.Dutch));
+            Assert.Equal("€2.69", new PicnicProduct("s1", "x", 269, "", "").PriceTextIn(AppText.English));
+        }
+        finally
+        {
+            Thread.CurrentThread.CurrentCulture = before;
+        }
+    }
+
+    [Fact]
+    public void AmountReason_follows_the_language()
+    {
+        var item = Item(500, "gram") with { PicnicPack = null };
+
+        Assert.Equal("1 pak (geen pakgrootte bekend)", item.AmountReasonIn(AppText.Dutch));
+        Assert.Equal("1 pack (pack size unknown)", item.AmountReasonIn(AppText.English));
+    }
 }
