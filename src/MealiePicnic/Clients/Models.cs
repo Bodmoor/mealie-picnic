@@ -15,20 +15,49 @@ public sealed record PicnicProduct(
         : "";
 }
 
+/// <summary>The allergen groups this app reads (issue #14).</summary>
+public static class AllergenGroups
+{
+    /// <summary>
+    /// All tree nuts and peanuts together. EU labelling law lists them as two
+    /// separate allergens, and one chip covering both is a deliberate choice for
+    /// this app rather than an oversight: it is what the household asked for.
+    /// </summary>
+    public const string Nuts = "nuts";
+
+    /// <summary>Milk and the dairy names that do not contain the word.</summary>
+    public const string Milk = "milk";
+}
+
 /// <summary>
-/// The facts Picnic only publishes on the product page (issue #6): whether the
-/// product is organic, and its salt content per 100 g.
+/// One allergen group found on a product page (issue #14).
 ///
-/// Both are optional by design. <see cref="Organic"/> false means "no organic
-/// claim found", not "conventional", and a null <see cref="SaltGramsPer100"/>
-/// means the nutrition table could not be read -- neither is worth showing as a
-/// negative, so the UI simply omits what it does not know.
+/// <see cref="Declared"/> is the difference between Picnic saying so and us
+/// noticing: true when the term was emphasised in the ingredient list, which EU
+/// labelling requires of a declared allergen, and false when our own word list
+/// matched ordinary text. The card shows the first with a tick and the second
+/// with a question mark, because they are not the same claim.
+/// </summary>
+public sealed record AllergenMark(string Group, bool Declared);
+
+/// <summary>
+/// The facts Picnic only publishes on the product page: whether the product is
+/// organic and its salt content per 100 g (issue #6), and which allergens its
+/// ingredient list names (issue #14).
+///
+/// All of them are optional by design. <see cref="Organic"/> false means "no
+/// organic claim found", not "conventional"; a null <see cref="SaltGramsPer100"/>
+/// means the nutrition table could not be read; and an empty
+/// <see cref="Allergens"/> means nothing matched, which is emphatically not the
+/// same as "contains none of them". None is worth showing as a negative, so the
+/// UI omits what it does not know and never renders a "free from" claim.
 /// </summary>
 public sealed record PicnicDetails(
     string Id,
     bool Organic,
     double? SaltGramsPer100,
-    string? SaltText);
+    string? SaltText,
+    IReadOnlyList<AllergenMark> Allergens);
 
 /// <summary>How a shopping list item relates to Picnic, for the current household.</summary>
 public enum LinkState

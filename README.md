@@ -135,6 +135,11 @@ sent to Mealie — which is where the sharp edges are:
 * `ProductFactsTests` — the organic and salt readers, weighted towards the false
   positives: "biologisch afbreekbaar" is biodegradable packaging, not organic food,
   and a "per 100 g" heading is not a salt figure.
+* `AllergenTests` — the two groups, weighted towards the false positives that a
+  positive-only display turns into lies on the card: `kokosmelk` and `melkdistel` are not
+  dairy, `nootmuskaat` is not a nut, and `amandelmelk` is nuts but not milk. Also that
+  emphasis inside a compound (`karne**melk**poeder`) still declares, and that the grid
+  never words its explanation as a "free from" claim.
 * `AppOptionsTests` — defaults, required keys, blank values falling through, and the
   OIDC-vs-`APP_PASSWORD` required-key interplay.
 * `TokenStoreTests` — the token survives a restart, so 2FA stays rare; also that a
@@ -179,6 +184,17 @@ POST /cart/add_product    {product_id, count}
   borrowed from a suggested organic alternative would be worse than no leaf at all. When
   Picnic renames those blocks, both facts go quiet rather than wrong, and a warning is
   logged.
+* **Allergen chips are informational, and their absence proves nothing.** Two chips,
+  `noten` (all tree nuts and peanuts together) and `melk` (including `lactose`, `wei` and
+  `caseïne`), read from the ingredient accordion. A tick means Picnic emphasised the
+  allergen itself, which EU labelling requires of a declaration; a question mark means our
+  own word list matched ordinary text. A card with no chip is not a claim that the product
+  is free of anything — it may equally be a page that could not be read, and the app never
+  renders a "free from" claim anywhere. **Do not rely on this if someone's health depends
+  on it: read the packaging.** Two known limits: the emphasis rule is inferred from the
+  labelling rules rather than confirmed against a captured product page (no fixture here
+  contains an allergen section), and whole-word matching means `amandelmelk` raises
+  neither chip on unemphasised text although almond is a tree nut.
 * Quantities: a Mealie line's `quantity` only means "how many to buy" when the unit is
   countable (`stuks`, or no unit). For mass and volume the app buys one pack, unless the
   household's stored pack size is known and smaller than needed — 2 kg against 1 kg bags
