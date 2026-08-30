@@ -31,7 +31,11 @@ view instead, with everything Picnic's product page gives us — the ingredient 
 nutrition sections, the highlights, the description, the organic claim and the
 salt figure — laid out in one place.
 
-Its reason for existing is the allergen chips (issue #48). The detail view shows
+Its reason for existing is the allergen chips (issue #48). It also carries a
+**Koppelen** button beside the product name, so the decision and the action happen
+in the same place -- before that, acting on what you had just read meant going back
+and finding the same card in the grid again (issue #76). A product that is already
+the linked one shows that instead of a button. The detail view shows
 **why** each chip is there: the word that matched and the ingredient text around
 it. A chip carries one of three strengths, and they are three different claims:
 

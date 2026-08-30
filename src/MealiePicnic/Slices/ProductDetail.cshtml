@@ -16,6 +16,16 @@
         ["imageId"] = Model.ImageId,
     };
     var contextVals = System.Text.Json.JsonSerializer.Serialize(context);
+    // What the grid's own card posts, built here from the same values (issue #76).
+    // Serialized server-side rather than hand-built, for the reason HitsGrid gives:
+    // a product name from Picnic can contain a quote.
+    var linkVals = System.Text.Json.JsonSerializer.Serialize(new
+    {
+        foodId = it.FoodId,
+        picnicUid = Model.ProductId,
+        label = Model.Name ?? d.Title,
+        pack = Model.Pack,
+    });
     var sections = d.Sections ?? [];
     var highlights = (d.Highlights ?? []).Where(h => !string.IsNullOrWhiteSpace(h)).ToList();
     var description = (d.Description ?? []).Where(h => !string.IsNullOrWhiteSpace(h)).ToList();
@@ -29,6 +39,22 @@
         @if (!string.IsNullOrWhiteSpace(Model.Pack))
         {
             <span class="muted">@Model.Pack</span>
+        }
+
+        @* Issue #76. The view exists because the card cannot tell you enough to
+           choose; making you go back to the grid to act on the choice put the
+           decision and the action in different places. Same post the card makes,
+           deliberately without hx-push-url: linking is an action, not a place. *@
+        @if (Model.AlreadyLinked)
+        {
+            <span class="tag linked">&check; @t.TagLinked</span>
+        }
+        else
+        {
+            <button class="primary link-here"
+                    hx-post="@($"/api/link?listId={Uri.EscapeDataString(Model.ListId)}")"
+                    hx-vals="@linkVals"
+                    hx-target="#view" hx-swap="outerHTML">@t.DetailsLink</button>
         }
     </div>
 

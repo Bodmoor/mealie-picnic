@@ -227,6 +227,11 @@ public static class Html
           .allergen { font-size:11.5px; padding:0 6px; border-radius:20px;
                       border:1px solid #5a4d20; color:#c9a227; white-space:nowrap }
           /* Product detail (issue #48) */
+          /* The link action sits with the product name, not below the ingredient
+             list: on a phone that table is long, and the whole point is that it is
+             reachable once you have read enough to decide (issue #76). */
+          .bar .link-here { margin-left:auto }
+          .bar .tag.linked { margin-left:auto }
           .detail { display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap }
           .detail-image { width:180px; height:180px; object-fit:contain;
                           background:#fff; border-radius:9px; flex:none }

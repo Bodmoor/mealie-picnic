@@ -42,6 +42,16 @@ public sealed record ProductDetailModel(
     PicnicDetails Details,
     IReadOnlyDictionary<string, AllergenVerdict> Verdicts)
 {
+    /// <summary>
+    /// Whether the food is already linked to this exact product (issue #76). The
+    /// detail view shows a state rather than a button then: the round trip would
+    /// change nothing, and the question "am I already using this one?" is one the
+    /// reader would otherwise have to go back to the grid to answer.
+    /// </summary>
+    public bool AlreadyLinked =>
+        !string.IsNullOrEmpty(Item.PicnicUid) &&
+        string.Equals(Item.PicnicUid, ProductId, StringComparison.Ordinal);
+
     /// <summary>The verdict on one allergen group, if anyone has recorded one.</summary>
     public AllergenVerdict? VerdictFor(string group) =>
         Verdicts.TryGetValue(group, out var verdict) ? verdict : null;

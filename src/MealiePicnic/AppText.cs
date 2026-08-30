@@ -227,6 +227,7 @@ public sealed record AppText
     // --------------------------------------------------- product detail (#48)
 
     public required string DetailsOpen { get; init; }
+    public required string DetailsLink { get; init; }
     public required string DetailsBack { get; init; }
     public required string DetailsAllergens { get; init; }
     public required string DetailsFacts { get; init; }
@@ -464,6 +465,7 @@ public sealed record AppText
             "Geen label betekent niet dat het product vrij is van dat allergeen.",
 
         DetailsOpen = "Productinfo",
+        DetailsLink = "Koppelen",
         DetailsBack = "Terug naar de resultaten",
         DetailsAllergens = "Allergenen",
         DetailsFacts = "Kenmerken",
@@ -606,6 +608,7 @@ public sealed record AppText
             "No label does not mean the product is free of that allergen.",
 
         DetailsOpen = "Details",
+        DetailsLink = "Link this product",
         DetailsBack = "Back to the results",
         DetailsAllergens = "Allergens",
         DetailsFacts = "Facts",
