@@ -20,6 +20,33 @@ public static class Html
     /// response whose second half the browser ignored: the list simply would not
     /// refresh after a check-off, with nothing anywhere saying why.
     /// </summary>
+    /// <summary>
+    /// The shell, but booting a view other than the shopping list (issue #74).
+    ///
+    /// Needed because the app's views are htmx swaps of one page. Once they push
+    /// history entries, a URL like /api/items/{id} is something a browser can
+    /// navigate to directly — a reload, a shared link, a history restore that
+    /// missed htmx's cache — and answering that with a bare fragment renders an
+    /// unstyled page with no shell around it. So a non-htmx request gets the
+    /// whole page, told to load that fragment on arrival.
+    /// </summary>
+    /// <param name="fragmentUrl">
+    /// Always the request's own path and query, which is caller-controlled: it is
+    /// HTML-encoded before it reaches the attribute, and refused outright unless
+    /// it is a local /api/ path, so it cannot become markup or point elsewhere.
+    /// </param>
+    public static string BootingInto(string fragmentUrl)
+    {
+        if (!fragmentUrl.StartsWith("/api/", StringComparison.Ordinal) || fragmentUrl.Contains("//", StringComparison.Ordinal))
+            throw new ArgumentException("Only a local /api/ path can be booted into.", nameof(fragmentUrl));
+
+        var encoded = System.Text.Encodings.Web.HtmlEncoder.Default.Encode(fragmentUrl);
+        return AppPage.Replace(
+            "<div id=\"view\" hx-get=\"/api/list\"",
+            $"<div id=\"view\" hx-get=\"{encoded}\"",
+            StringComparison.Ordinal);
+    }
+
     public static string AsOutOfBandSwap(string listHtml)
     {
         const string marker = "<div id=\"view\"";

@@ -28,7 +28,7 @@
         var sub = it.State == LinkState.Linked
             ? $"{(string.IsNullOrEmpty(it.PicnicLabel) ? it.PicnicUid : it.PicnicLabel)} · {it.AmountReason}"
             : it.Display;
-        <div class="item" hx-get="@($"/api/items/{it.FoodId}?listId={Uri.EscapeDataString(Model.CurrentListId)}")" hx-target="#view" hx-swap="outerHTML">
+        <div class="item" hx-get="@($"/api/items/{it.FoodId}?listId={Uri.EscapeDataString(Model.CurrentListId)}")" hx-target="#view" hx-swap="outerHTML" hx-push-url="true">
             <div>
                 <div class="name">@it.FoodName</div>
                 <div class="sub">@sub@(string.IsNullOrEmpty(it.Label) ? "" : $" · {it.Label}")</div>

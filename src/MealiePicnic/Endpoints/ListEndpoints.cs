@@ -55,6 +55,9 @@ internal static class ListEndpoints
             if (listId is not null && !Guid.TryParse(listId, out _))
                 return Results.BadRequest(new { error = "invalid_list_id" });
 
+            // Navigated to rather than swapped in (issue #74): serve the shell.
+            if (EndpointHelpers.ShellFor(ctx) is { } shell) return shell;
+
             var householdKey = HouseholdContext.KeyOf(ctx.User);
             if (householdKey is null) return EndpointHelpers.NoHousehold(ctx.User);
 
@@ -68,6 +71,8 @@ internal static class ListEndpoints
         {
             if (!Guid.TryParse(foodId, out _) || (listId is not null && !Guid.TryParse(listId, out _)))
                 return Results.BadRequest(new { error = "invalid_request" });
+
+            if (EndpointHelpers.ShellFor(ctx) is { } shell) return shell;
 
             var householdKey = HouseholdContext.KeyOf(ctx.User);
             if (householdKey is null) return EndpointHelpers.NoHousehold(ctx.User);

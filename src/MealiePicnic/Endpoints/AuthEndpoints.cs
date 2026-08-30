@@ -75,11 +75,19 @@ internal static class AuthEndpoints
         // through Authentik either way.
         app.MapGet("/login", async (HttpContext ctx, AppOptions opt) =>
         {
+            var returnUrl = ctx.Request.Query["ReturnUrl"].ToString();
+            var target = LocalOrHome(returnUrl);
+
+            // Already signed in (issue #74). The app is one htmx page, so pressing
+            // Back leaves it -- and the entry it leaves to is this one, left behind
+            // by the sign-in round trip. Showing a login page to a live session, or
+            // bouncing it through the identity provider again, is what made Back
+            // look broken.
+            if (ctx.User.Identity?.IsAuthenticated == true)
+                return Results.Redirect(target);
+
             if (!opt.OidcEnabled)
                 return Results.Content(await LoginPage.Create(false).RenderAsync(), "text/html");
-
-            var returnUrl = ctx.Request.Query["ReturnUrl"].ToString();
-            var target = string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl;
 
             if (SsoFlow.ShouldTrySilently(ctx))
             {
@@ -106,7 +114,7 @@ internal static class AuthEndpoints
             return Results.Challenge(
                 new AuthenticationProperties
                 {
-                    RedirectUri = string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl,
+                    RedirectUri = LocalOrHome(returnUrl),
                     IsPersistent = true,
                 },
                 [OpenIdConnectDefaults.AuthenticationScheme]);
@@ -131,6 +139,18 @@ internal static class AuthEndpoints
                 HandlePasswordLoginAsync(ctx, opt, log)
             ).AllowAnonymous().RequireRateLimiting("credentials");
         }
+
+        // Where a ReturnUrl may point. Anything that is not a path on this site is
+        // discarded rather than followed: a redirect parameter an attacker can set
+        // is worth more to them than the page they would be redirecting away from
+        // (issue #74). Leading "//" is the one that catches people -- "//evil.test"
+        // is a protocol-relative URL, not a local path.
+        static string LocalOrHome(string? returnUrl) =>
+            !string.IsNullOrEmpty(returnUrl)
+            && returnUrl.StartsWith('/')
+            && !returnUrl.StartsWith("//", StringComparison.Ordinal)
+                ? returnUrl
+                : "/";
 
         // POST, not GET: a state-changing GET can be triggered cross-site by an <img> tag,
         // and SameSite=Lax/Strict does not stop top-level GET navigations.

@@ -74,7 +74,7 @@ else
                 <button class="info" title="@t.DetailsOpen" aria-label="@t.DetailsOpen"
                         hx-get="@($"/api/products/{Uri.EscapeDataString(p.Id)}?listId={Uri.EscapeDataString(Model.ListId)}")"
                         hx-vals="@detailVals"
-                        hx-target="#view" hx-swap="outerHTML">i</button>
+                        hx-target="#view" hx-swap="outerHTML" hx-push-url="true">i</button>
             </div>
         }
     </div>

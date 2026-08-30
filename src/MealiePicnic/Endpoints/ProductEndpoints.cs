@@ -27,6 +27,8 @@ internal static class ProductEndpoints
             if (!Regex.IsMatch(productId, "^[A-Za-z0-9_-]{1,32}$"))
                 return Results.BadRequest(new { error = "invalid_product_id" });
 
+            if (EndpointHelpers.ShellFor(ctx) is { } shell) return shell;
+
             return await RenderProductAsync(productId, listId, foodId, name, pack, imageId,
                 picnic, reads, links, verdicts, opt, ctx, ct);
         });
