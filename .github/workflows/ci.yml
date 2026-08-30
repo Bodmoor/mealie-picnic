@@ -30,10 +30,33 @@ jobs:
       - name: Test
         run: dotnet test --no-build --logger "console;verbosity=normal"
 
-      - name: Vulnerable packages (advisory)
-        # Non-blocking for now: surfaces known-vulnerable (transitive) packages
-        # in the log without failing the build. Tighten once the baseline is clean.
-        run: dotnet list package --vulnerable --include-transitive || true
+      - name: Vulnerable packages
+        # Was advisory "until the baseline is clean". It is clean -- two direct
+        # dependencies, no advisories against either or their transitives -- so
+        # this is a gate now: an advisory check nobody reads is the same as no
+        # check, and this app is internet-facing.
+        #
+        # The command exits 0 even when it finds something, so the output is what
+        # has to be inspected. Two ways that can go wrong, and both are guarded:
+        #
+        #   * without pipefail, the pipeline's status is `tee`'s -- always 0 --
+        #     so a scan that failed outright would look like a pass
+        #   * hunting only for the bad line means a scan that produced NO listing
+        #     (an unreachable audit source, say) also looks like a pass, which is
+        #     the same silence this step was promoted from advisory to fix
+        #
+        # So: fail on the bad line, and require the good one to actually be there.
+        run: |
+          set -o pipefail
+          dotnet list package --vulnerable --include-transitive | tee vulnerable.txt
+          if grep -q "has the following vulnerable packages" vulnerable.txt; then
+            echo "::error::Vulnerable packages found -- see the listing above."
+            exit 1
+          fi
+          if ! grep -q "has no vulnerable packages given the current sources" vulnerable.txt; then
+            echo "::error::The vulnerability scan produced no verdict -- treating that as a failure."
+            exit 1
+          fi
 
   # PR-only: proves the Dockerfile still builds and that no secret can reach a
   # layer. On main the publish workflow builds (and re-checks) the real image,

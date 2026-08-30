@@ -7,6 +7,10 @@ namespace MealiePicnic.Tests;
 /// buy" for countable units; for mass and volume it describes how much of one
 /// product is needed.
 /// </summary>
+/// <summary>In the AppText collection: AmountReason reads the process-wide
+/// AppText for its number format, so it races with the test that switches the
+/// global to English (see AppTextCollectionAuditTests).</summary>
+[Collection(AppTextCollection.Name)]
 public class QuantitiesTests
 {
     [Theory]

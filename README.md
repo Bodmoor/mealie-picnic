@@ -141,6 +141,49 @@ All via environment variables.
 | `COOKIE_SECURE`        | no       | `true`         | Secure flag on the session cookie (needs TLS); set `false` for plain-HTTP loopback-only local dev |
 | `TRUST_PROXY`          | no       | `true`         | honour X-Forwarded-* from a reverse proxy; set `false` only when nothing is actually in front |
 
+## Logging
+
+One line per request — method, path, status, elapsed — plus whatever the app
+itself has to say. The framework's own request logging is turned down to
+`Warning` in `appsettings.json`, which is a security setting as much as a noise
+one: it logs the full request URL at `Information`, and the OIDC callback carries
+the authorization code and state in the query string. Those were being written to
+the console in full.
+
+The replacement logs `Request.Path`, never the query string, so it cannot leak one
+by construction. A test pins that, and fails if either the middleware or the log
+level regresses.
+
+Warnings raised while serving a request carry a scope naming the signed-in
+identity, so a line like `Household lookup failed` can be traced back to whose
+request it was. The identity is resolved when the line is written, not when the
+scope opens: the middleware runs before authentication — deliberately, so a
+request the rate limiter rejects still gets a line — and there is no identity yet
+at that point. The request id comes from the framework's own scope, so this one
+does not repeat it. `/health` and `/assets/*` are not logged.
+
+Raise a category temporarily without rebuilding by setting it in `stack.env` —
+noting that this particular one **re-opens the OIDC leak above** for as long as it
+is set, since it turns the framework's full-URL logging back on:
+
+```
+Logging__LogLevel__Microsoft.AspNetCore=Information
+```
+
+## Health
+
+`GET /health` is anonymous and answers `{"status":"ok"}`, or 503 when `DATA_DIR`
+is not writable. That one check is deliberate: a read-only volume silently breaks
+token and link storage while every page still renders, which is the one case
+where "the port answers" is actively misleading.
+
+It does not check Picnic — a lapsed token is an ordinary state the UI already
+handles, and reporting it as unhealthy would have a restart loop fighting a login
+prompt. It reveals nothing else either, since anyone on the internet can reach it.
+
+The Dockerfile still has no `HEALTHCHECK`: the aspnet base image ships neither
+curl nor wget. Poll this from the reverse proxy or from monitoring instead.
+
 ## Icons
 
 The three PNGs and `eu-organic.svg` in `src/MealiePicnic/assets/` are
@@ -178,6 +221,12 @@ sent to Mealie — which is where the sharp edges are:
   not: an expired record is dropped on load, and a file written under an older schema is
   discarded rather than reinterpreted. Also that a corrupt or unwritable file degrades to
   "no cached facts" instead of taking the app down with it.
+* `BasketRunTests` — the run that spends money: two foods linked to one product are
+  summed into a single line, a product missing from the returned cart is reported as
+  refused rather than added, a failed Mealie check-off still reports a successful add
+  (a failed line would invite a retry and a double order), an upstream failure aborts
+  every line with the upstream message, and an auth failure or a cancellation is
+  rethrown rather than folded into per-line errors.
 * `MealieReadsTests` — one request reads a list once; a *new* request reads it again,
   because the shopping list is shared mutable data and must not be cached across
   requests; and `Invalidate()` really does force the re-read the basket run depends on
@@ -302,7 +351,11 @@ POST /cart/add_product    {product_id, count}
   behind TLS and builds absolute URLs (e.g. the OIDC `redirect_uri`) as `http://`,
   which most identity providers then reject as a mismatch. Set both to `false`
   explicitly only when there truly is no proxy at all (e.g. plain-HTTP loopback-only
-  local dev, which `docker-compose.yml` already does).
+  local dev, which `docker-compose.yml` already does). The app sets **no HSTS
+  header**, deliberately: TLS terminates at that proxy and the app cannot know
+  whether the connection outside it was secure. Enabling HSTS is the proxy's job,
+  on the host that serves this, and worth checking — it is off by default in
+  nginx-proxy-manager.
 * Household resolution (issue #17) happens once, at sign-in, and is cached as a claim
   on the session cookie — not looked up again until the next login. If the signed-in
   email is not linked to any Mealie household, sign-in still succeeds, but every

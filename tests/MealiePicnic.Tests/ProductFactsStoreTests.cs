@@ -1,6 +1,8 @@
 using System.Text.Json;
 using MealiePicnic.Clients;
 using MealiePicnic.Storage;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace MealiePicnic.Tests;
@@ -45,6 +47,39 @@ public class ProductFactsStoreTests : IDisposable
         var allergen = Assert.Single(restarted.Allergens);
         Assert.Equal(AllergenGroups.Milk, allergen.Group);
         Assert.True(allergen.Declared);
+    }
+
+    [Fact]
+    public void A_graceful_shutdown_writes_what_is_still_in_memory()
+    {
+        // Issue #64. The store only writes every 30 seconds from inside Put, so
+        // without a shutdown hook a `docker compose down` discards whatever was
+        // parsed since the last write. This asserts the wiring, not Flush itself:
+        // the test above already proves Flush works, and proved nothing about
+        // whether production ever calls it.
+        var dir = Path.Combine(_dir, "hosted");
+        var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("MEALIE_URL", "https://mealie.test");
+            builder.UseSetting("MEALIE_TOKEN", "test-token");
+            builder.UseSetting("APP_PASSWORD", "correct-horse-battery-staple");
+            builder.UseSetting("DATA_DIR", dir);
+            // Pinned rather than inherited: WebApplicationFactory loads the
+            // developer's real user secrets in Development, so a machine with
+            // OIDC configured hosts a different app than CI does.
+            builder.UseSetting("BOODSCHAPPEN_OIDC_AUTHORITY", "");
+            builder.UseSetting("BOODSCHAPPEN_OIDC_CLIENT_ID", "");
+            builder.UseSetting("BOODSCHAPPEN_OIDC_CLIENT_SECRET", "");
+        });
+
+        // Resolving from the host is what starts it, so the lifetime exists.
+        factory.Services.GetRequiredService<ProductFactsStore>().Put(Details("s3000000"));
+        factory.Dispose();   // stops the host, which runs ApplicationStopping
+
+        var restarted = new ProductFactsStore(TestFactory.Options(dir),
+            NullLogger<ProductFactsStore>.Instance);
+
+        Assert.NotNull(restarted.Get("s3000000"));
     }
 
     [Fact]

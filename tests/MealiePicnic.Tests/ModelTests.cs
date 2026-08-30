@@ -3,6 +3,15 @@ using MealiePicnic.Clients;
 
 namespace MealiePicnic.Tests;
 
+/// <summary>
+/// In the AppText collection because <c>PriceText</c> reads
+/// <see cref="AppText.Current"/> for its decimal separator. Without that, this
+/// class ran in parallel with AllergenTests, which switches the global to
+/// English for one test — and a price formatted during that window comes back
+/// as "€2.69" where Dutch was asserted. It passed for a long time on scheduling
+/// luck alone.
+/// </summary>
+[Collection(AppTextCollection.Name)]
 public class ModelTests
 {
     // Amount lives in Quantities now and is covered by QuantitiesTests; these are
