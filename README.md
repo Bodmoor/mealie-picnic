@@ -98,7 +98,8 @@ All via environment variables.
 | `PICNIC_COUNTRY`       | no       | `NL`           | `NL`, `DE`, `FR`                          |
 | `LANGUAGE`             | no       | `nl`           | interface language: `nl` or `en` (`en-GB` and the like also select English). Independent of `PICNIC_COUNTRY` — the storefront stays whatever the country says, so an English interface on the Dutch storefront is a normal setup. Anything unrecognised falls back to Dutch. Also decides the decimal separator: `€2,69` / `1,2 g` in Dutch, `€2.69` / `1.2 g` in English |
 | `PICNIC_API_VERSION`   | no       | `15`           | bump if Picnic starts returning 400s      |
-| `SEARCH_CACHE_MINUTES` | no       | `30`           | in-memory cache for searches; product pages are held 12 h |
+| `SEARCH_CACHE_MINUTES` | no       | `30`           | in-memory cache for searches. Shared between users on purpose (a household orders from one address), but a cached result is only served to someone who actually holds a Picnic token |
+| `PRODUCT_FACTS_TTL_HOURS` | no    | `168`          | how long organic, salt and allergens are kept per product. Persisted to `DATA_DIR/product-facts.json`, so a restart no longer costs a page fetch per card. A week rather than forever because a **reformulated** product is what a long expiry gets wrong: an added allergen would go unseen for this long. Do not raise it much past a month |
 | `DATA_DIR`             | no       | `/data`        | volume for the token and device id        |
 | `COOKIE_SECURE`        | no       | `true`         | Secure flag on the session cookie (needs TLS); set `false` for plain-HTTP loopback-only local dev |
 | `TRUST_PROXY`          | no       | `true`         | honour X-Forwarded-* from a reverse proxy; set `false` only when nothing is actually in front |
@@ -136,6 +137,14 @@ sent to Mealie — which is where the sharp edges are:
 * `ProductFactsTests` — the organic and salt readers, weighted towards the false
   positives: "biologisch afbreekbaar" is biodegradable packaging, not organic food,
   and a "per 100 g" heading is not a salt figure.
+* `ProductFactsStoreTests` — what survives a restart and, more importantly, what must
+  not: an expired record is dropped on load, and a file written under an older schema is
+  discarded rather than reinterpreted. Also that a corrupt or unwritable file degrades to
+  "no cached facts" instead of taking the app down with it.
+* `MealieReadsTests` — one request reads a list once; a *new* request reads it again,
+  because the shopping list is shared mutable data and must not be cached across
+  requests; and `Invalidate()` really does force the re-read the basket run depends on
+  after it checks items off.
 * `AllergenTests` — the two groups, weighted towards the false positives that a
   positive-only display turns into lies on the card: `kokosmelk` and `melkdistel` are not
   dairy, `nootmuskaat` is not a nut, and `amandelmelk` is nuts but not milk. Also that
@@ -204,6 +213,13 @@ POST /cart/add_product    {product_id, count}
   quiet rather than wrong. That is the opposite trade-off from salt, which deliberately
   widens to every section: a missed salt figure is an annoyance, a wrong allergen chip is
   a lie.
+* **What is cached, and for how long.** Picnic searches are held in memory for
+  `SEARCH_CACHE_MINUTES`; product facts for `PRODUCT_FACTS_TTL_HOURS` in memory *and* on
+  disk under `DATA_DIR`; product images for 4 h in memory and a week in the browser. The
+  Mealie shopping list is deliberately **not** cached beyond a single request — it is
+  shared mutable data, so someone else's edit shows up on your next request rather than
+  after a timeout. Nothing here is a shared cache across containers: the deployment is a
+  single instance, so in-process plus disk is the whole story.
 * Quantities: a Mealie line's `quantity` only means "how many to buy" when the unit is
   countable (`stuks`, or no unit). For mass and volume the app buys one pack, unless the
   household's stored pack size is known and smaller than needed — 2 kg against 1 kg bags
