@@ -25,6 +25,14 @@ public class EndpointMetadataTests
             builder.UseSetting("MEALIE_TOKEN", "test-token");
             builder.UseSetting("APP_PASSWORD", "correct-horse-battery-staple");
             builder.UseSetting("DATA_DIR", Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+            // Set explicitly, not left to the machine: WebApplicationFactory loads
+            // the developer's real user secrets in Development, so whether OIDC is
+            // configured -- and therefore whether /login/admin is mapped at all --
+            // otherwise depends on whose laptop is running the suite. It passed
+            // locally and failed in CI for exactly that reason.
+            builder.UseSetting("BOODSCHAPPEN_OIDC_AUTHORITY", "https://authentik.test/application/o/boodschappen/");
+            builder.UseSetting("BOODSCHAPPEN_OIDC_CLIENT_ID", "boodschappen");
+            builder.UseSetting("BOODSCHAPPEN_OIDC_CLIENT_SECRET", "secret");
         });
 
     private static List<RouteEndpoint> Endpoints(WebApplicationFactory<Program> factory) =>
