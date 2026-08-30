@@ -1,22 +1,11 @@
 using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
-using System.Threading.RateLimiting;
-using MealiePicnic;
 using MealiePicnic.Clients;
 using MealiePicnic.Presentation;
 using MealiePicnic.Slices;
 using MealiePicnic.Storage;
 using RazorSlices;
-using Microsoft.AspNetCore.Authentication;          // SignInAsync / SignOutAsync
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication.OpenIdConnect;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.DataProtection;
-using Microsoft.AspNetCore.HttpOverrides;
-using Microsoft.AspNetCore.RateLimiting;
+
+namespace MealiePicnic.Endpoints;
 
 /// <summary>
 /// Helpers shared by more than one endpoint group (issue #66). They were local
@@ -30,7 +19,7 @@ using Microsoft.AspNetCore.RateLimiting;
 internal static class EndpointHelpers
 {
     // The signed-in identity resolved to no Mealie household at login (see the
-    // OIDC OnTicketReceived handler above) -- e.g. the email is not linked to a
+    // OIDC OnTicketReceived handler in Program.cs) -- e.g. the email is not linked to a
     // household in Mealie yet. Not a permission problem (403), a data/config one:
     // naming the email lets whoever sees it know exactly what to fix (issue #17).
     internal static IResult NoHousehold(ClaimsPrincipal user)
@@ -45,7 +34,13 @@ internal static class EndpointHelpers
         }, statusCode: StatusCodes.Status422UnprocessableEntity);
     }
 
-    internal static async Task<string> ResolveListIdAsync(
+    /// <summary>
+    /// Which Mealie list to show when the caller did not name one: the household's
+    /// remembered choice if it still exists, else the configured default by name,
+    /// else whichever list is first. The old client-side loadLists() did this from
+    /// a cached array; the server does it now that there is none.
+    /// </summary>
+    private static string ResolveListId(
         string householdKey, List<ShoppingListSummary> lists, HouseholdLinkStore links, AppOptions opt)
     {
         var remembered = links.SelectedListId(householdKey);
@@ -63,7 +58,7 @@ internal static class EndpointHelpers
     {
         var lists = await reads.ListsAsync(ct);
         var resolvedListId = string.IsNullOrEmpty(listId)
-            ? await ResolveListIdAsync(householdKey, lists, links, opt)
+            ? ResolveListId(householdKey, lists, links, opt)
             : listId;
         var items = links.Merge(householdKey, await reads.ItemsAsync(
             string.IsNullOrEmpty(resolvedListId) ? null : resolvedListId, ct));
