@@ -25,6 +25,122 @@ public class AllergenTests
     private static AllergenMark? Group(IReadOnlyList<AllergenMark> marks, string group) =>
         marks.FirstOrDefault(m => m.Group == group);
 
+    // ------------------------------------------------------- traces (issue #58)
+
+    /// <summary>
+    /// The real ingredient list from Maza hoemoes chipotle, which carried a nut
+    /// chip. The nut words are in the last sentence -- the factory warning -- and
+    /// note there is no full stop before "Kan", which is why the trace detection
+    /// cannot rely on sentence boundaries.
+    /// </summary>
+    private const string Hoemoes =
+        "Ingrediënten: 56% kikkererwten, raapolie, 11% chipotle puree (60% Chipotle Chili pepers, " +
+        "water, azijn, uien, suiker, kruiden, zonnebloem olie), 8,5% SESAMPASTA (SESAMZAAD, zout), " +
+        "voedingszuren: citroenzuur, azijnzuur; zout, kruiden en specerijen (bevat koriander), " +
+        "conserveermiddel: kaliumsorbaat Kan sporen van NOTEN en PINDA'S bevatten.";
+
+    [Fact]
+    public void Sesame_does_not_raise_a_nut_mark()
+    {
+        // Checked because it was the first suspicion when that chip appeared. It
+        // is not the cause: no nut term matches sesame at all.
+        Assert.Empty(Read("8,5% SESAMPASTA (SESAMZAAD, zout)"));
+    }
+
+    [Fact]
+    public void A_may_contain_traces_line_is_marked_as_traces_not_as_an_ingredient()
+    {
+        var nuts = Group(Read(Hoemoes), AllergenGroups.Nuts);
+
+        Assert.NotNull(nuts);
+        Assert.Equal(AllergenEvidence.Traces, nuts.Evidence);
+    }
+
+    [Theory]
+    [InlineData("Kan sporen van noten bevatten.")]
+    [InlineData("Kan sporen bevatten van noten.")]
+    [InlineData("Bevat mogelijk sporen van noten.")]
+    // The term lists are Dutch, so the English wording only ever matters on a
+    // bilingual label where the allergen itself is still named in Dutch.
+    [InlineData("May contain traces of amandelen.")]
+    public void The_usual_precautionary_wordings_are_all_traces(string text)
+    {
+        var nuts = Group(Read(text), AllergenGroups.Nuts);
+
+        Assert.NotNull(nuts);
+        Assert.Equal(AllergenEvidence.Traces, nuts.Evidence);
+    }
+
+    [Fact]
+    public void An_ingredient_outranks_a_traces_line_for_the_same_group()
+    {
+        // A product that really does contain the allergen and also carries the
+        // factory warning must read as the stronger of the two.
+        var nuts = Group(Read("Ingrediënten: hazelnoten, suiker. Kan sporen van noten bevatten."),
+            AllergenGroups.Nuts);
+
+        Assert.NotNull(nuts);
+        Assert.Equal(AllergenEvidence.Suspected, nuts.Evidence);
+    }
+
+    [Fact]
+    public void An_emphasised_allergen_outranks_a_traces_line()
+    {
+        var nuts = Group(Read("Ingrediënten: **hazelnoten**. Kan sporen van pinda's bevatten."),
+            AllergenGroups.Nuts);
+
+        Assert.NotNull(nuts);
+        Assert.Equal(AllergenEvidence.Declared, nuts.Evidence);
+    }
+
+    [Fact]
+    public void Emphasis_inside_a_traces_line_is_still_only_traces()
+    {
+        // Picnic bolding a word inside a factory warning does not turn that
+        // warning into a statement about what is in the product.
+        var nuts = Group(Read("Ingrediënten: kikkererwten. Kan sporen van **noten** bevatten."),
+            AllergenGroups.Nuts);
+
+        Assert.NotNull(nuts);
+        Assert.Equal(AllergenEvidence.Traces, nuts.Evidence);
+    }
+
+    // -------------------------------------------------- evidence window (#58)
+
+    [Fact]
+    public void The_source_contains_the_word_it_is_evidence_for()
+    {
+        // The bug this replaces: the snippet was the first 240 characters of the
+        // fragment, so on a long ingredient list the quoted evidence reliably
+        // excluded the very term it was quoting for.
+        var nuts = Group(Read(Hoemoes), AllergenGroups.Nuts);
+
+        Assert.NotNull(nuts);
+        Assert.NotNull(nuts.Term);
+        Assert.Contains(nuts.Term, nuts.Source!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void A_trimmed_source_says_which_end_was_cut()
+    {
+        var nuts = Group(Read(Hoemoes), AllergenGroups.Nuts);
+
+        Assert.NotNull(nuts);
+        // The match is at the end of a long list, so there is text before it that
+        // did not fit and none after.
+        Assert.StartsWith("…", nuts.Source);
+        Assert.DoesNotContain("kikkererwten", nuts.Source);
+    }
+
+    [Fact]
+    public void A_short_ingredient_list_is_quoted_whole()
+    {
+        var nuts = Group(Read("Ingrediënten: hazelnoten, suiker."), AllergenGroups.Nuts);
+
+        Assert.NotNull(nuts);
+        Assert.Equal("Ingrediënten: hazelnoten, suiker.", nuts.Source);
+    }
+
     // ------------------------------------------------------------- plain text
 
     [Theory]

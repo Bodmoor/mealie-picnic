@@ -78,7 +78,7 @@ public class ProductDetailTests
         // The substance of issue #48: a chip on a card asserts something, and this
         // view is where that assertion is backed up.
         var html = await Detail(Details(
-            new AllergenMark(AllergenGroups.Nuts, Declared: false, "hazelnoten", "Volle melk, hazelnoten")));
+            new AllergenMark(AllergenGroups.Nuts, AllergenEvidence.Suspected, "hazelnoten", "Volle melk, hazelnoten")));
 
         Assert.Contains("hazelnoten", html);
         Assert.Contains("Volle melk, hazelnoten", html);
@@ -88,7 +88,7 @@ public class ProductDetailTests
     public async Task A_suspected_allergen_can_be_confirmed_or_denied()
     {
         var html = await Detail(Details(
-            new AllergenMark(AllergenGroups.Nuts, Declared: false, "hazelnoten", "Volle melk, hazelnoten")));
+            new AllergenMark(AllergenGroups.Nuts, AllergenEvidence.Suspected, "hazelnoten", "Volle melk, hazelnoten")));
 
         Assert.Contains("/api/products/s1002202/allergens/nuts", html);
         Assert.Contains("verdict=confirmed", html);
@@ -102,11 +102,26 @@ public class ProductDetailTests
         // a guess of ours. Offering a "not correct" button against it would turn a
         // safety label into a preference.
         var html = await Detail(Details(
-            new AllergenMark(AllergenGroups.Milk, Declared: true, "melk", "Volle **melk**")));
+            new AllergenMark(AllergenGroups.Milk, AllergenEvidence.Declared, "melk", "Volle **melk**")));
 
         Assert.DoesNotContain("verdict=denied", html);
         Assert.DoesNotContain("verdict=confirmed", html);
         Assert.Contains(Encoded(AppText.Current.DetailsDeclaredFixed), html);
+    }
+
+    [Fact]
+    public async Task A_traces_mark_says_it_is_a_factory_warning_and_stays_reviewable()
+    {
+        // Issue #58. It is not an ingredient claim, so it must not read like one
+        // -- but it is still our heuristic rather than Picnic's labelling, so
+        // unlike a declared mark it can be confirmed or denied.
+        var html = await Detail(Details(new AllergenMark(
+            AllergenGroups.Nuts, AllergenEvidence.Traces, "NOTEN",
+            "Kan sporen van NOTEN en PINDA'S bevatten.")));
+
+        Assert.Contains(Encoded(AppText.Current.AllergenTracesTitle), html);
+        Assert.Contains("allergen traces", html);
+        Assert.Contains("verdict=denied", html);
     }
 
     // ------------------------------------------------------------- the verdicts
@@ -114,7 +129,7 @@ public class ProductDetailTests
     [Fact]
     public async Task A_recorded_verdict_is_shown_with_who_made_it()
     {
-        var mark = new AllergenMark(AllergenGroups.Nuts, false, "hazelnoten", "Volle melk, hazelnoten");
+        var mark = new AllergenMark(AllergenGroups.Nuts, AllergenEvidence.Suspected, "hazelnoten", "Volle melk, hazelnoten");
         var html = await Detail(Details(mark), new Dictionary<string, AllergenVerdict>
         {
             [AllergenGroups.Nuts] = new(VerdictState.Denied, "paul@example.com", DateTimeOffset.UtcNow,
@@ -133,7 +148,7 @@ public class ProductDetailTests
     {
         // Picnic reformulates. A denial made against last year's recipe still
         // stands -- discarding it silently would be worse -- but it is not silent.
-        var mark = new AllergenMark(AllergenGroups.Nuts, false, "hazelnoten", "Volle melk, hazelnoten, soja");
+        var mark = new AllergenMark(AllergenGroups.Nuts, AllergenEvidence.Suspected, "hazelnoten", "Volle melk, hazelnoten, soja");
         var html = await Detail(Details(mark), new Dictionary<string, AllergenVerdict>
         {
             [AllergenGroups.Nuts] = new(VerdictState.Denied, null, DateTimeOffset.UtcNow, "Volle melk"),
@@ -145,7 +160,7 @@ public class ProductDetailTests
     [Fact]
     public async Task A_verdict_against_the_same_ingredients_is_not_flagged()
     {
-        var mark = new AllergenMark(AllergenGroups.Nuts, false, "hazelnoten", "Volle melk, hazelnoten");
+        var mark = new AllergenMark(AllergenGroups.Nuts, AllergenEvidence.Suspected, "hazelnoten", "Volle melk, hazelnoten");
         var html = await Detail(Details(mark), new Dictionary<string, AllergenVerdict>
         {
             [AllergenGroups.Nuts] = new(VerdictState.Confirmed, null, DateTimeOffset.UtcNow,

@@ -216,14 +216,23 @@ public static class ProductFacts
 
         foreach (var rule in Rules)
         {
-            var declared = false;
-            var suspected = false;
-            // The evidence behind the mark (issue #48). Kept from the first match
-            // only: the detail view wants to show why a chip is there, not every
-            // place the word occurs, and a declared match always replaces a
-            // suspected one because it is the stronger claim.
+            // The strongest evidence seen so far, and what backs it up (issues
+            // #48 and #58). Kept from the first match at each strength: the detail
+            // view wants to show why a chip is there, not every place the word
+            // occurs. Declared beats suspected beats traces, so a product whose
+            // list names an allergen AND carries a traces line reads as the
+            // stronger of the two.
+            AllergenEvidence? best = null;
             string? term = null;
             string? source = null;
+
+            void Record(AllergenEvidence evidence, string matched, string text, int at)
+            {
+                if (best is { } current && current <= evidence) return;
+                best = evidence;
+                term = matched;
+                source = Snippet(text, at, matched.Length);
+            }
 
             foreach (var raw in fragments)
             {
@@ -233,50 +242,99 @@ public static class ProductFacts
                 // left -- the same shape as the organic claim's NotAClaim, and
                 // for the same reason: one sentence can hold both.
                 var text = rule.Excluded is null ? raw : rule.Excluded.Replace(raw, " ");
+                var cleaned = Clean(text);
+                var traces = TraceSpans(cleaned);
 
                 foreach (Match emphasis in Emphasised.Matches(text))
                 {
                     var inner = emphasis.Groups["inner"].Value;
                     var hit = Anywhere[rule.Group].Match(inner);
                     if (!hit.Success) continue;
-                    declared = true;
-                    term = Clean(hit.Value);
-                    source = Snippet(Clean(text));
+
+                    // Located in the cleaned text so the offset lines up with the
+                    // snippet and the trace spans; the emphasis markers are gone
+                    // by then, so the raw index would be wrong.
+                    var matched = Clean(hit.Value);
+                    var at = cleaned.IndexOf(matched, StringComparison.OrdinalIgnoreCase);
+                    Record(InTraces(traces, at) ? AllergenEvidence.Traces : AllergenEvidence.Declared,
+                        matched, cleaned, at);
                     break;
                 }
 
-                if (declared) break;
-                if (suspected) continue;
+                if (best == AllergenEvidence.Declared) break;
 
-                var cleaned = Clean(text);
-                var loose = rule.Terms.Match(cleaned);
-                if (!loose.Success) continue;
-                suspected = true;
-                term = loose.Value;
-                source = Snippet(cleaned);
+                foreach (Match loose in rule.Terms.Matches(cleaned))
+                {
+                    Record(InTraces(traces, loose.Index) ? AllergenEvidence.Traces : AllergenEvidence.Suspected,
+                        loose.Value, cleaned, loose.Index);
+                    // A suspected match outside any traces line is the best this
+                    // pass can do; keep looking only while everything so far has
+                    // been a traces mention.
+                    if (best == AllergenEvidence.Suspected) break;
+                }
             }
 
-            if (declared || suspected)
-                found.Add(new AllergenMark(rule.Group, declared, term, source));
+            if (best is { } evidence)
+                found.Add(new AllergenMark(rule.Group, evidence, term, source));
         }
 
         return found;
     }
 
     /// <summary>
-    /// An ingredient list can run to several hundred characters, and the detail
-    /// view is quoting it as evidence rather than reproducing the label. Cut it
-    /// at a sentence-ish boundary so what is shown stays readable, and mark the
-    /// cut so nobody reads a truncated list as a complete one.
+    /// Precautionary cross-contamination statements: "kan sporen van noten
+    /// bevatten", "bevat mogelijk sporen van pinda", and the English forms
+    /// (issue #58).
+    ///
+    /// Anchored on the word "sporen"/"traces" rather than on sentence structure,
+    /// because these lines are not reliably sentences: the real text that
+    /// prompted this reads "...conserveermiddel: kaliumsorbaat Kan sporen van
+    /// NOTEN en PINDA'S bevatten." with no full stop before "Kan". The span runs
+    /// from the introducing verb to the end of that sentence, or to the end of
+    /// the text where there is no full stop at all.
     /// </summary>
-    private static string Snippet(string text)
-    {
-        const int limit = 240;
-        text = text.Trim();
-        if (text.Length <= limit) return text;
+    private static readonly Regex Precautionary = new(
+        @"\b(?:kan|kunnen|bevat|bevatten|may)\b[^.]{0,40}?\b(?:sporen|traces)\b[^.]*",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-        var cut = text.LastIndexOfAny(['.', ';', ','], limit);
-        return (cut > limit / 2 ? text[..cut] : text[..limit]).TrimEnd() + "…";
+    private static List<(int Start, int End)> TraceSpans(string text) =>
+        [.. Precautionary.Matches(text).Select(m => (m.Index, m.Index + m.Length))];
+
+    private static bool InTraces(List<(int Start, int End)> spans, int at) =>
+        at >= 0 && spans.Any(s => at >= s.Start && at < s.End);
+
+    /// <summary>
+    /// An ingredient list can run to several hundred characters, and the detail
+    /// view is quoting it as evidence rather than reproducing the label.
+    ///
+    /// The window is centred on the match (issue #58). It used to be the first
+    /// 240 characters of the fragment, which on a long list meant the quoted
+    /// evidence reliably excluded the very word it was evidence for -- the
+    /// panel showed "Gevonden in: NOTEN" above a passage with no "noten" in it.
+    /// Either end that had to be cut says so, so nobody reads a fragment as a
+    /// complete ingredient list.
+    /// </summary>
+    private static string Snippet(string text, int at, int length)
+    {
+        const int window = 240;
+        text = text.Trim();
+        if (text.Length <= window) return text;
+        if (at < 0) at = 0;
+
+        // Centre on the match, then pull back inside the string if that ran off
+        // either end -- a term at the very start or very end still gets a full
+        // window rather than half of one.
+        var start = Math.Max(0, at + length / 2 - window / 2);
+        start = Math.Min(start, text.Length - window);
+        var end = start + window;
+
+        // Prefer a clause boundary, but only when one is near enough that the
+        // window does not lose the match or most of its context.
+        var boundary = text.LastIndexOfAny(['.', ';', ','], start, Math.Min(start, 40));
+        if (boundary > 0 && boundary < at) start = boundary + 1;
+
+        var cut = text[start..Math.Min(end, text.Length)].Trim();
+        return (start > 0 ? "…" : "") + cut + (end < text.Length ? "…" : "");
     }
 
     private static Salt? Read(string text)

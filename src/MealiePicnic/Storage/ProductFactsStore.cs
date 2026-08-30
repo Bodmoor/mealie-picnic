@@ -44,7 +44,13 @@ public sealed class ProductFactsStore
     /// detail view unable to say why a chip is there and, worse, record verdicts
     /// with no ingredient text to go stale against. Discarding them costs one
     /// product-page fetch each.
-    private const int Schema = 2;
+    ///
+    /// Schema 3 (issue #58) replaced the declared/not-declared flag with a
+    /// strength that has three values, and re-centred the stored source text on
+    /// the match. A schema-2 record cannot say whether its mark came from a
+    /// "may contain traces" line, and would present a factory warning as an
+    /// ingredient -- exactly the bug that issue is about.
+    private const int Schema = 3;
 
     /// <summary>
     /// Enough for a very large household's browsing history at roughly a hundred
@@ -224,7 +230,7 @@ public sealed class ProductFactsStore
             details.Organic,
             details.SaltGramsPer100,
             details.SaltText,
-            [.. details.Allergens.Select(a => new StoredAllergen(a.Group, a.Declared, a.Term, a.Source))]);
+            [.. details.Allergens.Select(a => new StoredAllergen(a.Group, a.Evidence, a.Term, a.Source))]);
 
         // Note what is deliberately absent: Title, Highlights, Description and
         // Sections. That text is display-only and orders of magnitude larger than
@@ -236,7 +242,7 @@ public sealed class ProductFactsStore
             Organic,
             SaltGramsPer100,
             SaltText,
-            [.. (Allergens ?? []).Select(a => new AllergenMark(a.Group, a.Declared, a.Term, a.Source))]);
+            [.. (Allergens ?? []).Select(a => new AllergenMark(a.Group, a.Evidence, a.Term, a.Source))]);
     }
 
     /// <param name="Term">The word that matched, and <paramref name="Source"/> the
@@ -246,7 +252,7 @@ public sealed class ProductFactsStore
     /// never be able to go stale.</param>
     private sealed record StoredAllergen(
         [property: JsonPropertyName("group")] string Group,
-        [property: JsonPropertyName("declared")] bool Declared,
+        [property: JsonPropertyName("evidence")] AllergenEvidence Evidence,
         [property: JsonPropertyName("term")] string? Term = null,
         [property: JsonPropertyName("source")] string? Source = null);
 }

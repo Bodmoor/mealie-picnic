@@ -313,7 +313,10 @@ document.addEventListener('alpine:init', () => {
 //
 // A tick means Picnic marked the allergen itself, in the emphasis EU labelling
 // requires. A question mark means our own word list matched ordinary ingredient
-// text. They are different claims and the card must not blur them.
+// text. A tilde means the term appeared only in a "kan sporen van ... bevatten"
+// line, which is a warning about the factory rather than a statement about what
+// is in the product (issue #58). They are three different claims and the card
+// must not blur them.
 function factsHtml(d) {
   const out = [];
   if (d.organic) {
@@ -323,9 +326,14 @@ function factsHtml(d) {
   for (const allergen of d.allergens ?? []) {
     const label = labels[allergen.group];
     if (!label) continue;
-    const cls = allergen.declared ? 'allergen declared' : 'allergen';
-    const title = allergen.declared ? t('allergenDeclared') : t('allergenSuspected');
-    out.push(`<span class="${cls}" title="${title}">${label} ${allergen.declared ? '✓' : '?'}</span>`);
+    // Looked up by name, so an evidence value this build has no styling for
+    // falls back to the quietest reading rather than an unstyled chip.
+    const evidence = {
+      Declared: ['allergen declared', t('allergenDeclared'), '✓'],
+      Suspected: ['allergen', t('allergenSuspected'), '?'],
+      Traces: ['allergen traces', t('allergenTraces'), '~'],
+    }[allergen.evidence] ?? ['allergen traces', t('allergenTraces'), '~'];
+    out.push(`<span class="${evidence[0]}" title="${evidence[1]}">${label} ${evidence[2]}</span>`);
   }
   if (typeof d.saltGramsPer100 === 'number') {
     const g = d.saltGramsPer100;
