@@ -13,7 +13,12 @@ else
         if (r.Ok)
         {
             <div class="ok">
-                &check; @r.Name x@r.Amount
+                @* Parenthesised on purpose (issue #52). Razor leaves anything
+                   shaped like an email address alone so a literal one needs no
+                   escaping, and `x@@r.Amount` fits that shape -- local part `x`,
+                   domain `r.Amount` -- so it rendered as its own source text.
+                   `@@(...)` is an explicit expression and cannot be read that way. *@
+                &check; @r.Name x@(r.Amount)
                 @if (Model.CheckOff && !r.CheckedOff)
                 {
                     <span class="muted">@t.BasketInCartNotCheckedOff</span>
