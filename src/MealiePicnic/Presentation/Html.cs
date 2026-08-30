@@ -96,6 +96,22 @@ public static class Html
           h2 { font-size:15px; margin:26px 0 10px; color:#9aa0a6; font-weight:600 }
           a { color:#7fb2e5 }
           .bar { display:flex; gap:9px; flex-wrap:wrap; align-items:center; margin:16px 0 6px }
+          /* The controls above the list (issue #56). Three groups -- which list,
+             what to do with it, what to show -- so a break lands between them
+             rather than through one. */
+          .toolbar { display:flex; flex-wrap:wrap; align-items:center;
+                     gap:10px 14px; margin:16px 0 6px }
+          .toolbar .group { display:flex; align-items:center; gap:9px }
+          .toolbar .group + .group { padding-left:14px; border-left:1px solid #2a2d31 }
+          /* Below this width the groups stack, one per row. The dividers turn
+             horizontal with them: a left border on a group that has wrapped onto
+             its own line reads as a stray mark rather than a separator. */
+          @media (max-width:620px) {
+            .toolbar { flex-direction:column; align-items:stretch; gap:0 }
+            .toolbar .group { justify-content:space-between; padding:10px 0 }
+            .toolbar .group + .group { padding-left:0; border-left:0; border-top:1px solid #2a2d31 }
+            .toolbar .group select { flex:1 1 auto; min-width:0 }
+          }
           select { border:1px solid #3a3d41; background:#1d2024; color:#e8eaed;
                    border-radius:7px; padding:7px 9px; font-size:14px }
           button { border:1px solid #3a3d41; background:#1d2024; color:#e8eaed;
@@ -105,6 +121,11 @@ public static class Html
           button.primary:hover { background:#4a8fd4 }
           button.danger:hover { border-color:#c86a6a; color:#e59a9a }
           .muted { color:#9aa0a6; font-size:13px }
+          /* Each child is one complete statement, so a wrap happens between them
+             and never inside one (issue #56). The gap replaces the separator
+             character that used to be able to strand at a line end. */
+          .account { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 16px }
+          .account form { display:contents }
           .linklike { border:0; background:none; padding:0; color:#7fb2e5;
                       text-decoration:underline; cursor:pointer; font-size:inherit }
           .item { display:flex; align-items:center; gap:12px; padding:10px 12px;
@@ -220,13 +241,17 @@ public static class Html
           <img src="/icons/192.png" width="34" height="34" alt="">
           <h1>Mealie &rarr; Picnic</h1>
         </a>
-        <div class="muted" x-data x-cloak>
+        <!-- Two whole phrases, each one flex item (issue #56). The separator used
+             to be a literal &middot; between them, which on a narrow screen was
+             free to end up as the last thing on a line with nothing after it.
+             Spacing does that job now, so a wrap can only ever happen between
+             the two statements. -->
+        <div class="account muted" x-data x-cloak>
           <span x-show="$store.picnic.authenticated">{{text.PicnicLabel}}: <b class="ok">{{text.PicnicSignedIn}}</b>
             <a href="#" x-on:click.prevent="$store.picnic.logout()">{{text.PicnicSignOut}}</a></span>
           <span x-show="!$store.picnic.authenticated">{{text.PicnicLabel}}: <b class="bad">{{text.PicnicSignedOut}}</b>
             <a href="#" x-on:click.prevent="$store.picnic.promptLogin()">{{text.PicnicSignIn}}</a></span>
-          &middot;
-          <form method="post" action="/logout" style="display:inline">
+          <form method="post" action="/logout">
             <button type="submit" class="linklike">{{text.AppSignOutBefore}}<span x-show="$store.me.label"> (<span x-text="$store.me.label"></span>)</span>{{text.AppSignOutAfter}}</button>
           </form>
         </div>

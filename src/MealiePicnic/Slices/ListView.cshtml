@@ -38,22 +38,37 @@
     }
 }
 <div id="view" x-data="{ showExcluded: false }">
-    <div class="bar">
-        <select name="listId" title="@t.MealieListPicker"
-                hx-post="/api/lists/select" hx-target="#view" hx-swap="outerHTML">
-            @foreach (var l in Model.Lists)
-            {
-                <option value="@l.Id" @(l.Id == Model.CurrentListId ? "selected" : "")>@l.Name</option>
-            }
-        </select>
-        <button class="primary" hx-get="@($"/api/list?listId={Uri.EscapeDataString(Model.CurrentListId)}")"
-                hx-target="#view" hx-swap="outerHTML">@t.FetchMealieList</button>
-        <form style="display:contents" hx-post="/api/basket" hx-target="#basketlog" hx-swap="innerHTML">
-            <input type="hidden" name="listId" value="@Model.CurrentListId">
-            <button type="submit">@t.AddAllToBasket</button>
-            <label class="chk"><input type="checkbox" name="checkOff" value="true" checked> @t.CheckOffInMealie</label>
-        </form>
-        <label class="chk"><input type="checkbox" x-model="showExcluded"> @t.ShowExcluded</label>
+    @* Three groups, because there are three separate concerns here (issue #56):
+       which list, what to do with it, and what to show. Grouping them in the
+       markup is what lets the browser break BETWEEN them instead of through
+       them -- the previous single flex row left the basket button's own
+       checkbox stranded beside an unrelated one. The form keeps
+       display:contents so its button and option sit in the group's flex flow
+       while still submitting together. *@
+    <div class="toolbar">
+        <div class="group">
+            <select name="listId" title="@t.MealieListPicker"
+                    hx-post="/api/lists/select" hx-target="#view" hx-swap="outerHTML">
+                @foreach (var l in Model.Lists)
+                {
+                    <option value="@l.Id" @(l.Id == Model.CurrentListId ? "selected" : "")>@l.Name</option>
+                }
+            </select>
+            <button class="primary" hx-get="@($"/api/list?listId={Uri.EscapeDataString(Model.CurrentListId)}")"
+                    hx-target="#view" hx-swap="outerHTML">@t.FetchMealieList</button>
+        </div>
+
+        <div class="group">
+            <form style="display:contents" hx-post="/api/basket" hx-target="#basketlog" hx-swap="innerHTML">
+                <input type="hidden" name="listId" value="@Model.CurrentListId">
+                <button type="submit">@t.AddAllToBasket</button>
+                <label class="chk"><input type="checkbox" name="checkOff" value="true" checked> @t.CheckOffInMealie</label>
+            </form>
+        </div>
+
+        <div class="group">
+            <label class="chk"><input type="checkbox" x-model="showExcluded"> @t.ShowExcluded</label>
+        </div>
     </div>
     <div id="basketlog" class="log"></div>
 
