@@ -139,12 +139,28 @@ if (options.OidcEnabled)
             // Non-silent failures are left alone so real problems still surface.
             OnRemoteFailure = ctx =>
             {
-                if (ctx.Properties?.Items.ContainsKey(SsoFlow.SilentItem) != true)
+                if (ctx.Properties?.Items.ContainsKey(SsoFlow.SilentItem) == true)
+                {
+                    var target = ctx.Properties.RedirectUri is { Length: > 0 } uri ? uri : "/";
+                    ctx.HandleResponse();
+                    ctx.Response.Redirect($"/login?sso=manual&ReturnUrl={Uri.EscapeDataString(target)}");
                     return Task.CompletedTask;
+                }
 
-                var target = ctx.Properties.RedirectUri is { Length: > 0 } uri ? uri : "/";
+                // Everything else used to fall through to a rethrow, which meant an
+                // unhandled exception and a 500 with a stack trace (issue #72). The
+                // callback is anonymous and internet-facing, so the ways to reach it
+                // without valid state are all ordinary: a scanner probing the path, a
+                // stale callback URL reloaded from history, a correlation cookie that
+                // expired mid-login. None of them is an application fault, and the
+                // deployed log filled with them.
+                //
+                // A warning names the reason; the caller lands on /login, which is
+                // where someone who followed a dead callback wanted to be anyway.
+                ctx.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>()
+                    .LogWarning("OIDC callback failed: {Reason}", ctx.Failure?.Message ?? "unknown");
                 ctx.HandleResponse();
-                ctx.Response.Redirect($"/login?sso=manual&ReturnUrl={Uri.EscapeDataString(target)}");
+                ctx.Response.Redirect("/login?sso=manual");
                 return Task.CompletedTask;
             },
 
