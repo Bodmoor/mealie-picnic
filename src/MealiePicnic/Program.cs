@@ -222,6 +222,14 @@ builder.Services.AddRateLimiter(limiter =>
 
 var app = builder.Build();
 
+// Issue #64. The store writes at most every 30 seconds from inside Put, which is
+// the right trade for an unclean kill -- but a `docker compose down` is not one.
+// The process is being asked to stop and has time to write one small file, and
+// the alternative is re-fetching product pages after every deploy, on a host
+// where those are the slowest thing this app does. Flush already swallows its
+// own write failures, so this cannot turn a shutdown into an exception.
+app.Lifetime.ApplicationStopping.Register(app.Services.GetRequiredService<ProductFactsStore>().Flush);
+
 if (options.TrustProxy)
 {
     // Behind a TLS-terminating reverse proxy the app must see the original scheme,
