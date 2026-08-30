@@ -31,6 +31,7 @@ builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<TokenStore>();
 builder.Services.AddSingleton<HouseholdLinkStore>();
 builder.Services.AddSingleton<AllergenVerdictStore>();
+builder.Services.AddSingleton<ProductFactsStore>();
 builder.Services.AddHttpContextAccessor();
 
 // Keep the key ring on the mounted volume. The default location is inside the
@@ -43,11 +44,22 @@ builder.Services
     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(options.DataDir, "keys")));
 
 // Bounded: search terms and image ids are caller-chosen, so an unbounded cache is
-// an OOM waiting to happen. Entries set their Size (bytes for images, 1 for JSON).
+// an OOM waiting to happen.
+//
+// Every entry sets its Size in approximate BYTES, so this limit means what it
+// says. It did not before: images counted their real length while a search list
+// claimed a flat 64 KB and a details record claimed 1 KB, which made the budget
+// a number with no unit and 64 MB a guess about nothing in particular.
 builder.Services.AddMemoryCache(cache => cache.SizeLimit = 64 * 1024 * 1024);
 
 builder.Services.AddHttpClient<MealieClient>();
 builder.Services.AddHttpClient<PicnicClient>();
+
+// Scoped, not singleton: this memoises Mealie reads for the life of ONE request
+// and no longer. The shopping list is shared mutable data, so it gets no TTL --
+// what it removes is the same list being fetched two or three times while
+// serving a single keystroke. See MealieReads.
+builder.Services.AddScoped<MealieReads>();
 
 // Single-password cookie auth in front of everything. Simple on purpose: this app
 // holds credentials for a supermarket account, so it must not be open.
@@ -112,6 +124,35 @@ if (options.OidcEnabled)
 
         oidc.Events = new OpenIdConnectEvents
         {
+            // Silent authentication: GET /login attempts the handshake with
+            // prompt=none first, so an existing Authentik session signs the user
+            // straight in and no button is shown at all. Authentik must not
+            // render any UI during that attempt -- prompt=none is what makes it
+            // answer immediately with either a code or an error.
+            OnRedirectToIdentityProvider = ctx =>
+            {
+                if (ctx.Properties.Items.ContainsKey(SsoFlow.SilentItem))
+                    ctx.ProtocolMessage.Prompt = "none";
+                return Task.CompletedTask;
+            },
+
+            // A silent attempt that finds no usable session comes back as
+            // `login_required` (or `interaction_required`), which the handler
+            // surfaces as a remote failure. That is an expected outcome, not an
+            // error: swallow it and fall back to the page with the button, which
+            // is exactly the behaviour this app had before silent auth existed.
+            // Non-silent failures are left alone so real problems still surface.
+            OnRemoteFailure = ctx =>
+            {
+                if (ctx.Properties?.Items.ContainsKey(SsoFlow.SilentItem) != true)
+                    return Task.CompletedTask;
+
+                var target = ctx.Properties.RedirectUri is { Length: > 0 } uri ? uri : "/";
+                ctx.HandleResponse();
+                ctx.Response.Redirect($"/login?sso=manual&ReturnUrl={Uri.EscapeDataString(target)}");
+                return Task.CompletedTask;
+            },
+
             // Resolve the caller's Mealie household once, here at sign-in, and
             // stash it on the cookie -- not on every request, which would mean
             // an admin-API round trip on every shopping-list load (issue #17).
@@ -121,6 +162,12 @@ if (options.OidcEnabled)
             // explicitly (see HouseholdContext) instead of guessing a household.
             OnTicketReceived = async ctx =>
             {
+                // Sign-in succeeded, so neither guard rail is needed any more:
+                // the "just signed out" suppression has served its purpose, and
+                // the one-attempt marker must go or the next visit after this
+                // cookie expires would skip the silent attempt for no reason.
+                SsoFlow.ClearMarkers(ctx.HttpContext);
+
                 var email = ctx.Principal?.FindFirstValue("email")
                     ?? ctx.Principal?.FindFirstValue(ClaimTypes.Email);
                 if (string.IsNullOrWhiteSpace(email))
@@ -337,29 +384,60 @@ async Task<IResult> HandlePasswordLoginAsync(HttpContext ctx, AppOptions opt, IL
 }
 
 // Static files (the SPA) are behind auth too, hence no UseStaticFiles() before this.
-// With OIDC configured this shows a "sign in" button rather than auto-challenging.
-// Authentik typically has its own active SSO session and re-authenticates
-// silently once challenged, so an immediate auto-challenge would make signing
-// out of the app instantly bounce back in with no visible transition -- this
-// page is the deliberate click that stands between the two. The cookie
-// handler's own redirect-to-/login (with ?ReturnUrl=...) is what lands here for
-// any unauthenticated request, so the original destination is preserved through
-// the round trip to Authentik and back.
+//
+// With OIDC configured, this first tries to sign the caller in *silently*
+// (prompt=none): Authentik usually has its own live session, and making someone
+// click a button to consummate a session they already hold is friction with no
+// decision in it (issue #49). Three things stop that becoming a nuisance:
+//
+//   * an explicit sign-out sets a short-lived marker, so signing out of the app
+//     does not immediately bounce back in through Authentik's still-live session
+//     with no visible transition -- the reason this page existed in the first place
+//   * every attempt sets a one-minute marker, so a silent success whose cookie
+//     fails to stick (misconfigured TLS, say) cannot turn into a redirect loop
+//   * ?sso=manual, which the silent attempt's own failure path redirects to,
+//     always renders the button
+//
+// In all three cases the page below appears, exactly as it did before. The cookie
+// handler's own redirect-to-/login (with ?ReturnUrl=...) is what lands here for any
+// unauthenticated request, so the original destination survives the round trip
+// through Authentik either way.
 app.MapGet("/login", async (HttpContext ctx, AppOptions opt) =>
 {
     if (!opt.OidcEnabled)
         return Results.Content(await LoginPage.Create(false).RenderAsync(), "text/html");
 
     var returnUrl = ctx.Request.Query["ReturnUrl"].ToString();
-    var page = await OidcLoginPage.Create(string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl).RenderAsync();
+    var target = string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl;
+
+    if (SsoFlow.ShouldTrySilently(ctx))
+    {
+        SsoFlow.MarkAttempted(ctx, opt);
+        var silent = new AuthenticationProperties { RedirectUri = target, IsPersistent = true };
+        silent.Items[SsoFlow.SilentItem] = "1";
+        return Results.Challenge(silent, [OpenIdConnectDefaults.AuthenticationScheme]);
+    }
+
+    var page = await OidcLoginPage.Create(target).RenderAsync();
     return Results.Content(page, "text/html");
 }).AllowAnonymous();
 
+// IsPersistent is what actually gives the browser a cookie that outlives the
+// browser session. Without it the cookie handler writes no Expires at all, and
+// the 30-day ExpireTimeSpan configured above governs only the ticket inside the
+// cookie -- so closing the browser, or a phone evicting the tab, meant signing in
+// again from scratch (issue #49). Deliberately not applied to the /login/admin
+// break-glass path: a shared operator password should not leave a month-long
+// cookie behind on whatever machine used it.
 app.MapGet("/login/oidc", (HttpContext ctx) =>
 {
     var returnUrl = ctx.Request.Query["ReturnUrl"].ToString();
     return Results.Challenge(
-        new AuthenticationProperties { RedirectUri = string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl },
+        new AuthenticationProperties
+        {
+            RedirectUri = string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl,
+            IsPersistent = true,
+        },
         [OpenIdConnectDefaults.AuthenticationScheme]);
 }).AllowAnonymous();
 
@@ -385,9 +463,13 @@ if (options.OidcEnabled && options.AppPassword.Length > 0)
 
 // POST, not GET: a state-changing GET can be triggered cross-site by an <img> tag,
 // and SameSite=Lax/Strict does not stop top-level GET navigations.
-app.MapPost("/logout", async (HttpContext ctx) =>
+app.MapPost("/logout", async (HttpContext ctx, AppOptions opt) =>
 {
     await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    // Authentik's own session outlives this one, so without a marker the silent
+    // attempt on the very next /login would sign the user straight back in and
+    // the sign-out would look like it did nothing.
+    SsoFlow.MarkSignedOut(ctx, opt);
     return Results.Redirect("/login");
 });
 
@@ -495,43 +577,43 @@ async Task<string> ResolveListIdAsync(
 }
 
 async Task<(List<ShoppingListSummary> Lists, string ListId, List<ShoppingItem> Items)> LoadListAsync(
-    string householdKey, string? listId, MealieClient mealie, HouseholdLinkStore links, AppOptions opt,
+    string householdKey, string? listId, MealieReads reads, HouseholdLinkStore links, AppOptions opt,
     CancellationToken ct)
 {
-    var lists = await mealie.GetListsAsync(ct);
+    var lists = await reads.ListsAsync(ct);
     var resolvedListId = string.IsNullOrEmpty(listId)
         ? await ResolveListIdAsync(householdKey, lists, links, opt)
         : listId;
-    var items = links.Merge(householdKey, await mealie.GetItemsAsync(
+    var items = links.Merge(householdKey, await reads.ItemsAsync(
         string.IsNullOrEmpty(resolvedListId) ? null : resolvedListId, ct));
     return (lists, resolvedListId, items);
 }
 
 async Task<IResult> RenderListAsync(
-    string householdKey, string? listId, MealieClient mealie, HouseholdLinkStore links, AppOptions opt,
+    string householdKey, string? listId, MealieReads reads, HouseholdLinkStore links, AppOptions opt,
     CancellationToken ct)
 {
-    var (lists, resolvedListId, items) = await LoadListAsync(householdKey, listId, mealie, links, opt, ct);
+    var (lists, resolvedListId, items) = await LoadListAsync(householdKey, listId, reads, links, opt, ct);
     var html = await ListView.Create(new ListViewModel(lists, resolvedListId, items)).RenderAsync();
     return Results.Content(html, "text/html");
 }
 
 // Still JSON: kept for anyone hitting the API directly, but nothing in the UI
 // calls it any more -- the list picker is server-rendered by ListView.
-api.MapGet("/lists", async (MealieClient mealie, HouseholdLinkStore links, AppOptions opt, HttpContext ctx, CancellationToken ct) =>
+api.MapGet("/lists", async (MealieReads reads, HouseholdLinkStore links, AppOptions opt, HttpContext ctx, CancellationToken ct) =>
 {
     var householdKey = HouseholdContext.KeyOf(ctx.User);
     return Results.Ok(new
     {
         defaultName = opt.MealieList,
-        lists = await mealie.GetListsAsync(ct),
+        lists = await reads.ListsAsync(ct),
         selectedListId = householdKey is null ? null : links.SelectedListId(householdKey),
     });
 });
 
 // Triggered by the list <select>'s own hx-post (a plain element with
 // name="listId", not a form -- htmx still sends it as ordinary form-urlencoded).
-api.MapPost("/lists/select", async (HttpContext ctx, MealieClient mealie, HouseholdLinkStore links, AppOptions opt, CancellationToken ct) =>
+api.MapPost("/lists/select", async (HttpContext ctx, MealieReads reads, HouseholdLinkStore links, AppOptions opt, CancellationToken ct) =>
 {
     var form = await ctx.Request.ReadFormAsync(ct);
     var listId = form["listId"].ToString();
@@ -542,12 +624,12 @@ api.MapPost("/lists/select", async (HttpContext ctx, MealieClient mealie, Househ
     if (householdKey is null) return NoHousehold(ctx.User);
 
     links.SelectList(householdKey, listId);
-    return await RenderListAsync(householdKey, listId, mealie, links, opt, ct);
+    return await RenderListAsync(householdKey, listId, reads, links, opt, ct);
 });
 
 // listId omitted falls back to ResolveListIdAsync (remembered choice, or the
 // MEALIE_LIST default, or whatever list is first).
-api.MapGet("/list", async (string? listId, MealieClient mealie, HouseholdLinkStore links, AppOptions opt, HttpContext ctx, CancellationToken ct) =>
+api.MapGet("/list", async (string? listId, MealieReads reads, HouseholdLinkStore links, AppOptions opt, HttpContext ctx, CancellationToken ct) =>
 {
     if (listId is not null && !Guid.TryParse(listId, out _))
         return Results.BadRequest(new { error = "invalid_list_id" });
@@ -555,13 +637,13 @@ api.MapGet("/list", async (string? listId, MealieClient mealie, HouseholdLinkSto
     var householdKey = HouseholdContext.KeyOf(ctx.User);
     if (householdKey is null) return NoHousehold(ctx.User);
 
-    return await RenderListAsync(householdKey, listId, mealie, links, opt, ct);
+    return await RenderListAsync(householdKey, listId, reads, links, opt, ct);
 });
 
 // The detail/search view for one food. listId rides along as a query param
 // (baked into every link that points here) purely so the eventual "back to the
 // list" fragment knows which list to re-render.
-api.MapGet("/items/{foodId}", async (string foodId, string? listId, MealieClient mealie, HouseholdLinkStore links, AppOptions opt, HttpContext ctx, CancellationToken ct) =>
+api.MapGet("/items/{foodId}", async (string foodId, string? listId, MealieReads reads, HouseholdLinkStore links, AppOptions opt, HttpContext ctx, CancellationToken ct) =>
 {
     if (!Guid.TryParse(foodId, out _) || (listId is not null && !Guid.TryParse(listId, out _)))
         return Results.BadRequest(new { error = "invalid_request" });
@@ -569,7 +651,7 @@ api.MapGet("/items/{foodId}", async (string foodId, string? listId, MealieClient
     var householdKey = HouseholdContext.KeyOf(ctx.User);
     if (householdKey is null) return NoHousehold(ctx.User);
 
-    var (_, resolvedListId, items) = await LoadListAsync(householdKey, listId, mealie, links, opt, ct);
+    var (_, resolvedListId, items) = await LoadListAsync(householdKey, listId, reads, links, opt, ct);
     var item = items.FirstOrDefault(i => i.FoodId == foodId);
     if (item is null) return Results.NotFound();
 
@@ -579,7 +661,7 @@ api.MapGet("/items/{foodId}", async (string foodId, string? listId, MealieClient
 
 // The Picnic search grid for one food, re-fetched on every keystroke (debounced
 // client-side) and once on the search view's initial load.
-api.MapGet("/items/{foodId}/search", async (string foodId, string? listId, string? term, MealieClient mealie, PicnicClient picnic, HouseholdLinkStore links, AppOptions opt, HttpContext ctx, CancellationToken ct) =>
+api.MapGet("/items/{foodId}/search", async (string foodId, string? listId, string? term, MealieReads reads, PicnicClient picnic, HouseholdLinkStore links, AppOptions opt, HttpContext ctx, CancellationToken ct) =>
 {
     if (!Guid.TryParse(foodId, out _) || (listId is not null && !Guid.TryParse(listId, out _)))
         return Results.BadRequest(new { error = "invalid_request" });
@@ -587,7 +669,7 @@ api.MapGet("/items/{foodId}/search", async (string foodId, string? listId, strin
     var householdKey = HouseholdContext.KeyOf(ctx.User);
     if (householdKey is null) return NoHousehold(ctx.User);
 
-    var (_, resolvedListId, items) = await LoadListAsync(householdKey, listId, mealie, links, opt, ct);
+    var (_, resolvedListId, items) = await LoadListAsync(householdKey, listId, reads, links, opt, ct);
     var item = items.FirstOrDefault(i => i.FoodId == foodId);
     if (item is null) return Results.NotFound();
 
@@ -617,14 +699,14 @@ api.MapGet("/details/{productId}", async (string productId, PicnicClient picnic,
 
 api.MapGet("/products/{productId}", async (
     string productId, string? listId, string? foodId, string? name, string? pack, string? imageId,
-    PicnicClient picnic, MealieClient mealie, HouseholdLinkStore links,
+    PicnicClient picnic, MealieReads reads, HouseholdLinkStore links,
     AllergenVerdictStore verdicts, AppOptions opt, HttpContext ctx, CancellationToken ct) =>
 {
     if (!Regex.IsMatch(productId, "^[A-Za-z0-9_-]{1,32}$"))
         return Results.BadRequest(new { error = "invalid_product_id" });
 
     return await RenderProductAsync(productId, listId, foodId, name, pack, imageId,
-        picnic, mealie, links, verdicts, opt, ctx, ct);
+        picnic, reads, links, verdicts, opt, ctx, ct);
 });
 
 // Confirm or deny a suspected allergen, globally (issue #48). Re-renders the same
@@ -632,14 +714,16 @@ api.MapGet("/products/{productId}", async (
 // update together and the view cannot drift out of step with the store.
 api.MapPost("/products/{productId}/allergens/{group}", async (
     string productId, string group, string? verdict, string? listId,
-    PicnicClient picnic, MealieClient mealie, HouseholdLinkStore links,
+    PicnicClient picnic, MealieReads reads, HouseholdLinkStore links,
     AllergenVerdictStore verdicts, AppOptions opt, HttpContext ctx, CancellationToken ct) =>
 {
     if (!Regex.IsMatch(productId, "^[A-Za-z0-9_-]{1,32}$"))
         return Results.BadRequest(new { error = "invalid_product_id" });
 
     var form = await ctx.Request.ReadFormAsync(ct);
-    var details = await picnic.GetDetailsAsync(productId, ct);
+    // Full: the verdict is recorded against the mark's current source text, and
+    // that has to be the text the detail view is showing.
+    var details = await picnic.GetDetailsAsync(productId, ct, full: true);
     var mark = details.Allergens.FirstOrDefault(a => a.Group == group);
 
     // Only groups this product actually carries, and only suspected ones. A
@@ -661,12 +745,12 @@ api.MapPost("/products/{productId}/allergens/{group}", async (
 
     return await RenderProductAsync(productId, listId,
         form["foodId"].ToString(), form["name"].ToString(), form["pack"].ToString(), form["imageId"].ToString(),
-        picnic, mealie, links, verdicts, opt, ctx, ct);
+        picnic, reads, links, verdicts, opt, ctx, ct);
 });
 
 async Task<IResult> RenderProductAsync(
     string productId, string? listId, string? foodId, string? name, string? pack, string? imageId,
-    PicnicClient picnic, MealieClient mealie, HouseholdLinkStore links,
+    PicnicClient picnic, MealieReads reads, HouseholdLinkStore links,
     AllergenVerdictStore verdicts, AppOptions opt, HttpContext ctx, CancellationToken ct)
 {
     if (string.IsNullOrEmpty(foodId) || !Guid.TryParse(foodId, out _) ||
@@ -678,7 +762,7 @@ async Task<IResult> RenderProductAsync(
 
     // The item is what the back button and the heading need; the detail view is
     // still reached from one food's search results, not from nowhere.
-    var (_, resolvedListId, items) = await LoadListAsync(householdKey, listId, mealie, links, opt, ct);
+    var (_, resolvedListId, items) = await LoadListAsync(householdKey, listId, reads, links, opt, ct);
     var item = items.FirstOrDefault(i => i.FoodId == foodId);
     if (item is null) return Results.NotFound();
 
@@ -689,7 +773,9 @@ async Task<IResult> RenderProductAsync(
         ? imageId
         : null;
 
-    var details = await picnic.GetDetailsAsync(productId, ct);
+    // Full: the page text is what this view exists to show, and the persistent
+    // facts store deliberately does not keep it.
+    var details = await picnic.GetDetailsAsync(productId, ct, full: true);
     var model = new ProductDetailModel(
         item, resolvedListId, productId,
         string.IsNullOrWhiteSpace(name) ? null : name,
@@ -701,14 +787,30 @@ async Task<IResult> RenderProductAsync(
     return Results.Content(await ProductDetail.Create(model).RenderAsync(), "text/html");
 }
 
-api.MapGet("/image/{imageId}", async (string imageId, PicnicClient picnic, CancellationToken ct) =>
+api.MapGet("/image/{imageId}", async (string imageId, HttpContext ctx, PicnicClient picnic, CancellationToken ct) =>
 {
     // Route values arrive URL-decoded, so ..%2F.. would otherwise walk up the
     // Picnic storefront path (a limited SSRF). Image ids are long hex strings.
     if (!Regex.IsMatch(imageId, "^[A-Za-z0-9_-]{1,128}$"))
         return Results.BadRequest(new { error = "invalid_image_id" });
 
+    // The server cached these all along; the browser did not, because nothing
+    // set a header. Every htmx swap of the results grid therefore re-requested
+    // each visible image. The id is Picnic's own content id, so the bytes at
+    // this URL genuinely never change -- "immutable" here is the same claim
+    // /assets makes with its content hash, and lets a repeat view of the same
+    // grid skip the request entirely rather than merely revalidate it.
+    //
+    // Private, not public: these travel through an authenticated endpoint, and
+    // a shared proxy has no business holding them.
+    //
+    // Set AFTER the fetch, deliberately. A Picnic auth failure here is turned
+    // into a 401 by the middleware above, and the response has not started yet,
+    // so a header set beforehand would survive onto that 401 -- telling the
+    // browser to cache "not authorised" for a week and leaving the grid
+    // permanently broken for that image until site data was cleared.
     var bytes = await picnic.GetImageAsync(imageId, "medium", ct);
+    ctx.Response.Headers.CacheControl = "private, max-age=604800, immutable";
     return Results.File(bytes, "image/png");
 });
 
@@ -719,7 +821,7 @@ api.MapGet("/image/{imageId}", async (string imageId, PicnicClient picnic, Cance
 // names, read via data-* attributes and htmx's js: hx-vals rather than
 // interpolated into a hand-built JSON string, which a quote in a product name
 // would break).
-api.MapPost("/link", async (HttpContext ctx, MealieClient mealie, HouseholdLinkStore links, AppOptions opt, CancellationToken ct) =>
+api.MapPost("/link", async (HttpContext ctx, MealieReads reads, HouseholdLinkStore links, AppOptions opt, CancellationToken ct) =>
 {
     var listId = ctx.Request.Query["listId"].ToString();
     var form = await ctx.Request.ReadFormAsync(ct);
@@ -735,10 +837,10 @@ api.MapPost("/link", async (HttpContext ctx, MealieClient mealie, HouseholdLinkS
 
     // label/pack stored so the basket can work out how many packs a weight needs.
     links.Link(householdKey, foodId, picnicUid, form["label"].ToString(), form["pack"].ToString());
-    return await RenderListAsync(householdKey, listId, mealie, links, opt, ct);
+    return await RenderListAsync(householdKey, listId, reads, links, opt, ct);
 });
 
-api.MapPost("/exclude", async (HttpContext ctx, MealieClient mealie, HouseholdLinkStore links, AppOptions opt, CancellationToken ct) =>
+api.MapPost("/exclude", async (HttpContext ctx, MealieReads reads, HouseholdLinkStore links, AppOptions opt, CancellationToken ct) =>
 {
     var listId = ctx.Request.Query["listId"].ToString();
     var form = await ctx.Request.ReadFormAsync(ct);
@@ -750,11 +852,11 @@ api.MapPost("/exclude", async (HttpContext ctx, MealieClient mealie, HouseholdLi
     if (householdKey is null) return NoHousehold(ctx.User);
 
     links.Exclude(householdKey, foodId);
-    return await RenderListAsync(householdKey, listId, mealie, links, opt, ct);
+    return await RenderListAsync(householdKey, listId, reads, links, opt, ct);
 });
 
 // Revert an exclusion: clear the flag so the item shows up as 'new' again.
-api.MapPost("/include", async (HttpContext ctx, MealieClient mealie, HouseholdLinkStore links, AppOptions opt, CancellationToken ct) =>
+api.MapPost("/include", async (HttpContext ctx, MealieReads reads, HouseholdLinkStore links, AppOptions opt, CancellationToken ct) =>
 {
     var listId = ctx.Request.Query["listId"].ToString();
     var form = await ctx.Request.ReadFormAsync(ct);
@@ -766,12 +868,12 @@ api.MapPost("/include", async (HttpContext ctx, MealieClient mealie, HouseholdLi
     if (householdKey is null) return NoHousehold(ctx.User);
 
     links.Clear(householdKey, foodId);
-    return await RenderListAsync(householdKey, listId, mealie, links, opt, ct);
+    return await RenderListAsync(householdKey, listId, reads, links, opt, ct);
 });
 
 // ----------------------------------------------------------------- basket
 
-api.MapPost("/basket", async (HttpContext ctx, MealieClient mealie, PicnicClient picnic,
+api.MapPost("/basket", async (HttpContext ctx, MealieClient mealie, MealieReads reads, PicnicClient picnic,
                               HouseholdLinkStore links, AppOptions opt,
                               ILogger<Program> log, CancellationToken ct) =>
 {
@@ -784,7 +886,7 @@ api.MapPost("/basket", async (HttpContext ctx, MealieClient mealie, PicnicClient
     var householdKey = HouseholdContext.KeyOf(ctx.User);
     if (householdKey is null) return NoHousehold(ctx.User);
 
-    var (_, resolvedListId, items) = await LoadListAsync(householdKey, listId, mealie, links, opt, ct);
+    var (_, resolvedListId, items) = await LoadListAsync(householdKey, listId, reads, links, opt, ct);
     var toAdd = items.Where(i => i.State == LinkState.Linked && !i.Checked).ToList();
 
     // One request for the whole basket (issue #27), keyed by Picnic product id:
@@ -865,7 +967,13 @@ api.MapPost("/basket", async (HttpContext ctx, MealieClient mealie, PicnicClient
     // checkOff can change item.Checked server-side (Mealie), so the list itself
     // needs to move too -- an out-of-band swap updates #view in the same
     // response the basket log arrives in, instead of a second round trip.
-    var (freshLists, _, freshItems) = await LoadListAsync(householdKey, resolvedListId, mealie, links, opt, ct);
+    //
+    // The reload has to be a real one. MealieReads memoises for the life of the
+    // request, and this handler has already read the items once above; without
+    // dropping that memo the "fresh" list would be the pre-check-off one and the
+    // swapped-in view would show every item still unticked.
+    reads.Invalidate();
+    var (freshLists, _, freshItems) = await LoadListAsync(householdKey, resolvedListId, reads, links, opt, ct);
     var listHtml = await ListView.Create(new ListViewModel(freshLists, resolvedListId, freshItems)).RenderAsync();
     var oob = listHtml.Replace("<div id=\"view\"", "<div id=\"view\" hx-swap-oob=\"true\"");
     return Results.Content(logHtml + oob, "text/html");
@@ -883,6 +991,64 @@ app.Run();
 internal record TwoFactorChannel(string? Channel);
 internal record Otp(string? Code);
 internal record LoginRequest(string? User, string? Password);
+
+/// <summary>
+/// Cookie bookkeeping for the silent-SSO attempt on GET /login (issue #49).
+///
+/// Both markers are deliberately cookies rather than session state: they must be
+/// readable on a request that has no session yet, which is the entire situation
+/// being handled. Neither carries anything sensitive -- their presence alone is
+/// the signal -- but they are HttpOnly and SameSite=Lax like the auth cookie, so
+/// nothing script-side can clear them to force a silent attempt.
+/// </summary>
+internal static class SsoFlow
+{
+    /// <summary>Key on AuthenticationProperties.Items marking an attempt as silent.</summary>
+    public const string SilentItem = "mp:silent";
+
+    private const string AttemptedCookie = "mp_sso_tried";
+    private const string SignedOutCookie = "mp_signed_out";
+
+    // Long enough to break a redirect loop, short enough that a genuine second
+    // visit a few minutes later still gets the silent path.
+    private static readonly TimeSpan AttemptWindow = TimeSpan.FromMinutes(1);
+
+    // Long enough to see the login page and walk away; after this, returning to
+    // the app signs back in silently again, which is the desired default.
+    private static readonly TimeSpan SignedOutWindow = TimeSpan.FromMinutes(30);
+
+    public static bool ShouldTrySilently(HttpContext ctx) =>
+        !ctx.Request.Query.ContainsKey("sso")
+        && !ctx.Request.Cookies.ContainsKey(AttemptedCookie)
+        && !ctx.Request.Cookies.ContainsKey(SignedOutCookie);
+
+    public static void MarkAttempted(HttpContext ctx, AppOptions opt) =>
+        ctx.Response.Cookies.Append(AttemptedCookie, "1", Options(ctx, opt, AttemptWindow));
+
+    public static void MarkSignedOut(HttpContext ctx, AppOptions opt)
+    {
+        ctx.Response.Cookies.Delete(AttemptedCookie);
+        ctx.Response.Cookies.Append(SignedOutCookie, "1", Options(ctx, opt, SignedOutWindow));
+    }
+
+    public static void ClearMarkers(HttpContext ctx)
+    {
+        ctx.Response.Cookies.Delete(AttemptedCookie);
+        ctx.Response.Cookies.Delete(SignedOutCookie);
+    }
+
+    private static CookieOptions Options(HttpContext ctx, AppOptions opt, TimeSpan lifetime) => new()
+    {
+        HttpOnly = true,
+        SameSite = SameSiteMode.Lax,
+        // Mirrors the auth cookie's CookieSecurePolicy: Always when COOKIE_SECURE
+        // is on, otherwise whatever the current request is, so plain-HTTP local
+        // development still receives the cookie.
+        Secure = opt.CookieSecure || ctx.Request.IsHttps,
+        Path = "/",
+        MaxAge = lifetime,
+    };
+}
 
 /// <summary>Marker so WebApplicationFactory-based integration tests can host the app.</summary>
 public partial class Program;

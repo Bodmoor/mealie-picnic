@@ -29,6 +29,7 @@ public sealed class PicnicClient(
     AppOptions options,
     TokenStore tokens,
     IMemoryCache cache,
+    ProductFactsStore facts,
     IHttpContextAccessor accessor,
     ILogger<PicnicClient> log)
 {
@@ -177,10 +178,31 @@ public sealed class PicnicClient(
 
     // ------------------------------------------------------------------ catalog
 
+    /// <summary>
+    /// Search the catalogue. Cached per term for SEARCH_CACHE_MINUTES.
+    ///
+    /// The key carries the country because the storefront it came from is part of
+    /// what the answer means -- today only NL ships (#12 is shelved), so this
+    /// changes nothing now and cannot collide later.
+    ///
+    /// The entry is shared between users on purpose: a household orders from one
+    /// address, so re-fetching per person would cost most of the hit rate for an
+    /// identical answer. But a cache hit is served only to a caller who actually
+    /// holds a Picnic token. Without that check the hit returned before any
+    /// request was built, so someone not signed in to Picnic saw a full grid of
+    /// results and only discovered otherwise when the basket failed. HasToken is
+    /// a local dictionary read, so this costs nothing upstream.
+    ///
+    /// Known limit, recorded rather than guessed at: if Picnic varies price or
+    /// availability by account or delivery area, a shared entry would carry one
+    /// household's answer to another. Not verified against their API, and not
+    /// paid for speculatively -- partitioning the key by household is a one-line
+    /// change if it ever proves real.
+    /// </summary>
     public async Task<List<PicnicProduct>> SearchAsync(string term, CancellationToken ct)
     {
-        var key = $"search:{term.ToLowerInvariant()}";
-        if (cache.TryGetValue(key, out List<PicnicProduct>? hit) && hit is not null)
+        var key = $"search:{options.PicnicCountry.ToLowerInvariant()}:{term.ToLowerInvariant()}";
+        if (HasToken && cache.TryGetValue(key, out List<PicnicProduct>? hit) && hit is not null)
             return hit;
 
         var path = $"/pages/search-page-results?search_term={Uri.EscapeDataString(term)}";
@@ -194,7 +216,10 @@ public sealed class PicnicClient(
         cache.Set(key, products, new MemoryCacheEntryOptions
         {
             AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(options.SearchCacheMinutes),
-            Size = 64 * 1024,          // nominal: a parsed result list is small
+            // Approximate bytes, like every other entry, so the cache's size
+            // limit is a real budget: a product is five short strings and an
+            // int, and a page of results is rarely more than a few dozen.
+            Size = 256 + products.Count * 256,
         });
         log.LogInformation("Search '{Term}' -> {Count} products", term, products.Count);
         return products;
@@ -241,11 +266,33 @@ public sealed class PicnicClient(
     /// alternative must not lend its leaf to a conventional product. When Picnic
     /// renames those ids the result is empty facts, never wrong ones.
     /// </summary>
-    public async Task<PicnicDetails> GetDetailsAsync(string productId, CancellationToken ct)
+    /// <param name="full">
+    /// Whether the caller needs the product page's own text -- the ingredient and
+    /// nutrition sections, the highlights, the description (issue #48).
+    ///
+    /// The card only wants the derived facts, and those are what the persistent
+    /// store holds: a compact projection sized for thousands of products. The
+    /// page text is far larger and display-only, so it is deliberately not
+    /// persisted, which means a disk hit cannot satisfy a full request. Asking
+    /// for the full page therefore skips the disk store and, on a miss, fetches
+    /// the page -- still cached in memory for the same TTL, under its own key so
+    /// a stripped record can never answer a full request.
+    /// </param>
+    public async Task<PicnicDetails> GetDetailsAsync(string productId, CancellationToken ct, bool full = false)
     {
-        var key = $"details:{productId}";
+        var key = full ? $"details-full:{productId}" : $"details:{productId}";
         if (cache.TryGetValue(key, out PicnicDetails? hit) && hit is not null)
             return hit;
+
+        // Second look, on disk. Memory is the fast path; this is what makes a
+        // deploy cheap, since the in-process cache starts empty every time and a
+        // grid of ninety cards would otherwise re-fetch ninety product pages.
+        // Facts are catalogue data, not per-account, so a shared store is right.
+        if (!full && facts.Get(productId) is { } stored)
+        {
+            Remember(key, stored);
+            return stored;
+        }
 
         // Same rule as the image id: never build a path from an unvalidated value.
         if (!System.Text.RegularExpressions.Regex.IsMatch(productId, "^[A-Za-z0-9_-]{1,32}$"))
@@ -257,14 +304,32 @@ public sealed class PicnicClient(
         var details = json is null ? new PicnicDetails(productId, false, null, null, [])
                                    : ReadDetails(productId, json, log);
 
-        cache.Set(key, details, new MemoryCacheEntryOptions
-        {
-            // Nutrition and certification do not change between deliveries.
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(12),
-            Size = 1024,
-        });
+        Remember(key, details);
+        // The facts entry is worth having either way: a detail view opened first
+        // saves the card behind it a fetch.
+        if (full) Remember($"details:{productId}", details);
+        facts.Put(details);
         return details;
     }
+
+    /// <summary>
+    /// Hold facts in memory for the same span the store keeps them on disk, so
+    /// the two layers cannot disagree about how old is too old.
+    /// </summary>
+    private void Remember(string key, PicnicDetails details) =>
+        cache.Set(key, details, new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(options.ProductFactsTtlHours),
+            // Approximate bytes: two flags, a number and a short salt string,
+            // plus at most a couple of allergen marks -- each now carrying the
+            // matched term and the ingredient sentence behind it (issue #48) --
+            // and, for a full record, the page text the detail view renders.
+            Size = 256
+                   + details.Allergens.Count * 512
+                   + (details.Sections ?? []).Sum(s => s.Title.Length + s.Body.Sum(b => b.Length))
+                   + (details.Highlights ?? []).Sum(h => h.Length)
+                   + (details.Description ?? []).Sum(d => d.Length),
+        });
 
     /// <summary>Parse a product page. Static and internal so tests can feed it a tree.</summary>
     internal static PicnicDetails ReadDetails(string productId, JsonNode page, ILogger log)
