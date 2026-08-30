@@ -273,6 +273,15 @@ public sealed record AppText
 
     public required string JsMissingConfigAfter { get; init; }
 
+    /// <summary>
+    /// What a failed request says (issue #63). Two messages, because only two
+    /// things a reader can act on: an upstream is down and it is worth trying
+    /// again later, or something on our side went wrong and it is not.
+    /// </summary>
+    public required string JsUpstreamDown { get; init; }
+
+    public required string JsSomethingWentWrong { get; init; }
+
     public required Func<string, string> JsCodeSentVia { get; init; }
 
     /// <summary>
@@ -289,6 +298,8 @@ public sealed record AppText
         credsFromConfiguration = JsCredsFromConfiguration,
         missingConfigBefore = JsMissingConfigBefore,
         missingConfigAfter = JsMissingConfigAfter,
+        upstreamDown = JsUpstreamDown,
+        somethingWentWrong = JsSomethingWentWrong,
         and = JsAnd,
         enterEmail = JsEnterEmail,
         enterPassword = JsEnterPassword,
@@ -477,6 +488,9 @@ public sealed record AppText
         JsMissingConfigBefore = "Niet ingesteld in de configuratie: ",
         JsMissingConfigAfter = ". Vul aan; er wordt niets opgeslagen, alleen het token wordt bewaard.",
 
+        JsUpstreamDown = "Niet bereikbaar. Probeer het zo nog eens.",
+        JsSomethingWentWrong = "Er ging iets mis. De actie is niet uitgevoerd.",
+
         JsCodeSentVia = channel => $"Code verstuurd via {channel}.",
     };
 
@@ -615,6 +629,9 @@ public sealed record AppText
 
         JsMissingConfigBefore = "Not set in the configuration: ",
         JsMissingConfigAfter = ". Fill these in; nothing is stored, only the token is kept.",
+
+        JsUpstreamDown = "Not reachable. Try again in a moment.",
+        JsSomethingWentWrong = "Something went wrong. The action did not run.",
 
         JsCodeSentVia = channel => $"Code sent via {channel}.",
     };

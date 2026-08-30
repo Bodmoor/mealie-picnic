@@ -351,9 +351,41 @@ function factsHtml(d) {
 // A failed htmx request for lack of Picnic auth becomes the login dialog instead
 // of a dead swap. Global, so it covers every htmx-driven action on the page, not
 // just search (which is all the old pendingRetry flow covered).
+// Issue #63: every other failure. htmx does not swap a non-2xx response, so
+// before this a Mealie outage, a 500 or a timeout was a click that did nothing at
+// all, with no message anywhere on the page. Only two messages, because only two
+// things a reader can act on: the upstream is down and it is worth trying later,
+// or something else went wrong. The status code is not information they can use.
+function showStatus(message) {
+  const el = document.getElementById('status');
+  if (!el) return;
+  el.textContent = message;
+  el.hidden = false;
+}
+
+function clearStatus() {
+  const el = document.getElementById('status');
+  if (el) { el.textContent = ''; el.hidden = true; }
+}
+
+// A successful request means whatever was being reported is over.
+document.body.addEventListener('htmx:afterRequest', (evt) => {
+  if (evt.detail.successful) clearStatus();
+});
+
+// No response at all: the network failed, or the server never answered. htmx
+// raises this instead of responseError, so handling only the latter would leave
+// the most total kind of failure completely silent.
+document.body.addEventListener('htmx:sendError', () => showStatus(t('upstreamDown')));
+
 document.body.addEventListener('htmx:responseError', (evt) => {
   const xhr = evt.detail.xhr;
-  if (xhr.status !== 401 || !xhr.responseText.includes('picnic_auth')) return;
+  if (xhr.status !== 401 || !xhr.responseText.includes('picnic_auth')) {
+    // 502/503/504 is the reverse proxy or an upstream, which is worth retrying;
+    // anything else is ours and is not.
+    showStatus(xhr.status >= 502 && xhr.status <= 504 ? t('upstreamDown') : t('somethingWentWrong'));
+    return;
+  }
 
   evt.detail.isError = false; // this is handled, not a real error -- don't also log it to the console
   const store = Alpine.store('picnic');

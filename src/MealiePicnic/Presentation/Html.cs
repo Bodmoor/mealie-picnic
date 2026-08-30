@@ -231,6 +231,11 @@ public static class Html
                      border-radius:10px }
           label.chk { font-size:13px; color:#9aa0a6; display:flex; align-items:center; gap:6px;
                       cursor:pointer }
+          /* Issue #63. Sits above the view, so a failed action is visible without
+             scrolling whatever the failed action was going to replace. */
+          .status-bar { margin:14px 0 0; padding:9px 12px; border-radius:9px;
+                        border:1px solid #7a3f3f; background:#231a1a; color:#e0a2a2;
+                        font-size:13.5px }
           .log { font-size:13px; margin-top:12px }
           .log div { padding:2px 0 }
           .ok { color:#7fc08a } .bad { color:#e59a9a }
@@ -279,6 +284,13 @@ public static class Html
             </form>
           </div>
         </div>
+
+        <!-- Where a failed request says so (issue #63). Empty until something goes
+             wrong; aria-live so a screen reader announces it without the focus
+             being stolen, and role=status rather than alert because it reports a
+             failed action, not an emergency. Written from app.js, never swapped
+             into by htmx. -->
+        <div id="status" class="status-bar" role="status" aria-live="polite" hidden></div>
 
         <div id="view" hx-get="/api/list" hx-trigger="load" hx-swap="outerHTML">
           <p class="muted">{{text.Loading}}</p>
