@@ -68,16 +68,26 @@ public sealed record AppText
     public required string PicnicLabel { get; init; }
     public required string PicnicSignedIn { get; init; }
     public required string PicnicSignedOut { get; init; }
-    public required string PicnicSignIn { get; init; }
-    public required string PicnicSignOut { get; init; }
+    /// <summary>
+    /// Button labels, not words in a sentence (issue #60). Each names the service
+    /// it acts on, because the two sit side by side and "sign out" alone would
+    /// not say which one you were about to leave.
+    /// </summary>
+    public required string PicnicSignInAction { get; init; }
+
+    public required string PicnicSignOutAction { get; init; }
 
     /// <summary>
-    /// Split around the signed-in account, which the shell writes between them:
-    /// "afmelden (paul@example.com) bij deze app" (issue #22).
+    /// The app's own sign-out. The signed-in account, when there is one, is
+    /// appended by the shell in parentheses (issue #22) -- the shared-password
+    /// identity has no name to show, so the label has to stand on its own.
     /// </summary>
-    public required string AppSignOutBefore { get; init; }
+    public required string AppSignOutAction { get; init; }
 
-    public required string AppSignOutAfter { get; init; }
+    /// <summary>Tooltip saying which sign-out this is, since the label cannot
+    /// carry "bij deze app" and an account name at once without becoming a
+    /// sentence again.</summary>
+    public required string AppSignOutTitle { get; init; }
     public required string Loading { get; init; }
 
     // --------------------------------------------------------- picnic dialogs
@@ -340,10 +350,10 @@ public sealed record AppText
         PicnicLabel = "Picnic",
         PicnicSignedIn = "ingelogd",
         PicnicSignedOut = "niet ingelogd",
-        PicnicSignIn = "inloggen",
-        PicnicSignOut = "uitloggen",
-        AppSignOutBefore = "afmelden",
-        AppSignOutAfter = " bij deze app",
+        PicnicSignInAction = "Inloggen bij Picnic",
+        PicnicSignOutAction = "Uitloggen bij Picnic",
+        AppSignOutAction = "Afmelden",
+        AppSignOutTitle = "Afmelden bij deze app",
         Loading = "Laden...",
 
         CredsTitle = "Picnic inloggen",
@@ -479,10 +489,10 @@ public sealed record AppText
         PicnicLabel = "Picnic",
         PicnicSignedIn = "signed in",
         PicnicSignedOut = "not signed in",
-        PicnicSignIn = "sign in",
-        PicnicSignOut = "sign out",
-        AppSignOutBefore = "sign out",
-        AppSignOutAfter = " of this app",
+        PicnicSignInAction = "Sign in to Picnic",
+        PicnicSignOutAction = "Sign out of Picnic",
+        AppSignOutAction = "Sign out",
+        AppSignOutTitle = "Sign out of this app",
         Loading = "Loading...",
 
         CredsTitle = "Sign in to Picnic",
