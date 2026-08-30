@@ -266,9 +266,21 @@ public sealed class PicnicClient(
     /// alternative must not lend its leaf to a conventional product. When Picnic
     /// renames those ids the result is empty facts, never wrong ones.
     /// </summary>
-    public async Task<PicnicDetails> GetDetailsAsync(string productId, CancellationToken ct)
+    /// <param name="full">
+    /// Whether the caller needs the product page's own text -- the ingredient and
+    /// nutrition sections, the highlights, the description (issue #48).
+    ///
+    /// The card only wants the derived facts, and those are what the persistent
+    /// store holds: a compact projection sized for thousands of products. The
+    /// page text is far larger and display-only, so it is deliberately not
+    /// persisted, which means a disk hit cannot satisfy a full request. Asking
+    /// for the full page therefore skips the disk store and, on a miss, fetches
+    /// the page -- still cached in memory for the same TTL, under its own key so
+    /// a stripped record can never answer a full request.
+    /// </param>
+    public async Task<PicnicDetails> GetDetailsAsync(string productId, CancellationToken ct, bool full = false)
     {
-        var key = $"details:{productId}";
+        var key = full ? $"details-full:{productId}" : $"details:{productId}";
         if (cache.TryGetValue(key, out PicnicDetails? hit) && hit is not null)
             return hit;
 
@@ -276,7 +288,7 @@ public sealed class PicnicClient(
         // deploy cheap, since the in-process cache starts empty every time and a
         // grid of ninety cards would otherwise re-fetch ninety product pages.
         // Facts are catalogue data, not per-account, so a shared store is right.
-        if (facts.Get(productId) is { } stored)
+        if (!full && facts.Get(productId) is { } stored)
         {
             Remember(key, stored);
             return stored;
@@ -293,6 +305,9 @@ public sealed class PicnicClient(
                                    : ReadDetails(productId, json, log);
 
         Remember(key, details);
+        // The facts entry is worth having either way: a detail view opened first
+        // saves the card behind it a fetch.
+        if (full) Remember($"details:{productId}", details);
         facts.Put(details);
         return details;
     }
@@ -306,8 +321,14 @@ public sealed class PicnicClient(
         {
             AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(options.ProductFactsTtlHours),
             // Approximate bytes: two flags, a number and a short salt string,
-            // plus at most a couple of allergen marks.
-            Size = 256 + details.Allergens.Count * 64,
+            // plus at most a couple of allergen marks -- each now carrying the
+            // matched term and the ingredient sentence behind it (issue #48) --
+            // and, for a full record, the page text the detail view renders.
+            Size = 256
+                   + details.Allergens.Count * 512
+                   + (details.Sections ?? []).Sum(s => s.Title.Length + s.Body.Sum(b => b.Length))
+                   + (details.Highlights ?? []).Sum(h => h.Length)
+                   + (details.Description ?? []).Sum(d => d.Length),
         });
 
     /// <summary>Parse a product page. Static and internal so tests can feed it a tree.</summary>
@@ -323,11 +344,18 @@ public sealed class PicnicClient(
 
         var claims = new List<string>();
         var found = false;
+        // Kept apart as well as together (issue #48): the organic claim wants
+        // every fragment in one list, while the detail view wants to show the
+        // highlights and the description as the distinct blocks they are.
+        var blocks = new Dictionary<string, List<string>>();
         foreach (var id in own)
         {
             if (FindById(page, id) is not { } node) continue;
             found = true;
-            Markdowns(node, claims);
+            var block = new List<string>();
+            Markdowns(node, block);
+            blocks[id] = block;
+            claims.AddRange(block);
         }
 
         // The accordion holds ingredients, nutrition and extra information. Its
@@ -336,6 +364,7 @@ public sealed class PicnicClient(
         var nutrition = new List<string>();
         var accordionAll = new List<string>();
         var ingredients = new List<string>();
+        var sections = new List<DetailSection>();
         var accordionSections = 0;
         if (FindById(page, "accordion-list") is { } accordion)
         {
@@ -344,6 +373,7 @@ public sealed class PicnicClient(
             {
                 accordionSections++;
                 accordionAll.AddRange(body);
+                sections.Add(new DetailSection(title, body) { Ingredients = IsIngredientSection(title) });
                 if (title.Contains("voedingswaarde", StringComparison.OrdinalIgnoreCase) ||
                     title.Contains("nutrition", StringComparison.OrdinalIgnoreCase))
                     nutrition.AddRange(body);
@@ -398,12 +428,20 @@ public sealed class PicnicClient(
             log.LogDebug("Product page for {Id} had an accordion but no ingredient section", productId);
         }
 
+        var main = blocks.GetValueOrDefault("product-details-page-root-main-container", []);
+
         return new PicnicDetails(
             Id: productId,
             Organic: ProductFacts.IsOrganic(claims),
             SaltGramsPer100: salt?.Grams,
             SaltText: salt?.Text,
-            Allergens: ProductFacts.ReadAllergens(ingredients));
+            Allergens: ProductFacts.ReadAllergens(ingredients),
+            // The first markdown of the main container is the product name; the
+            // rest of that block is brand and unit, which the highlights repeat.
+            Title: ProductFacts.Clean(main.FirstOrDefault()) is { Length: > 0 } name ? name : null,
+            Highlights: blocks.GetValueOrDefault("product-page-highlights", []),
+            Description: blocks.GetValueOrDefault("description", []),
+            Sections: sections);
     }
 
     /// <summary>Depth-first search for the node carrying a given "id".</summary>

@@ -1,0 +1,177 @@
+@inherits RazorSlice<ProductDetailModel>
+@{
+    var t = AppText.Current;
+    var it = Model.Item;
+    var d = Model.Details;
+    var listQs = $"listId={Uri.EscapeDataString(Model.ListId)}";
+    var backQs = $"/api/items/{it.FoodId}?{listQs}";
+    var verdictBase = $"/api/products/{Uri.EscapeDataString(Model.ProductId)}/allergens";
+    // What is passed back on every verdict post, so the re-rendered panel is the
+    // same product with the same heading rather than a bare fragment.
+    var context = new Dictionary<string, string?>
+    {
+        ["foodId"] = it.FoodId,
+        ["name"] = Model.Name,
+        ["pack"] = Model.Pack,
+        ["imageId"] = Model.ImageId,
+    };
+    var contextVals = System.Text.Json.JsonSerializer.Serialize(context);
+    var sections = d.Sections ?? [];
+    var highlights = (d.Highlights ?? []).Where(h => !string.IsNullOrWhiteSpace(h)).ToList();
+    var description = (d.Description ?? []).Where(h => !string.IsNullOrWhiteSpace(h)).ToList();
+    var anything = d.Allergens.Count > 0 || d.Organic || d.SaltText is not null
+                   || sections.Count > 0 || highlights.Count > 0 || description.Count > 0;
+}
+<div id="view">
+    <div class="bar">
+        <button hx-get="@backQs" hx-target="#view" hx-swap="outerHTML">&larr; @t.DetailsBack</button>
+        <b>@(string.IsNullOrWhiteSpace(Model.Name) ? d.Title : Model.Name)</b>
+        @if (!string.IsNullOrWhiteSpace(Model.Pack))
+        {
+            <span class="muted">@Model.Pack</span>
+        }
+    </div>
+
+    <div class="detail">
+        @if (!string.IsNullOrEmpty(Model.ImageId))
+        {
+            <img class="detail-image" src="@($"/api/image/{Uri.EscapeDataString(Model.ImageId)}")" alt="">
+        }
+
+        <div class="detail-body">
+            @* Allergens first: they are the reason this view exists, and the only
+               part of it that asks anything of the reader. *@
+            <section>
+                <h3>@t.DetailsAllergens</h3>
+                @if (d.Allergens.Count == 0)
+                {
+                    <p class="muted">@t.AllergenNoteAfter</p>
+                }
+                else
+                {
+                    @foreach (var mark in d.Allergens)
+                    {
+                        var label = t.AllergenLabel(mark.Group);
+                        var verdict = Model.VerdictFor(mark.Group);
+                        <div class="allergen-row">
+                            <div class="allergen-head">
+                                <span class="allergen @(mark.Declared ? "declared" : "")">@label</span>
+                                <span class="muted">@(mark.Declared ? t.AllergenDeclaredTitle : t.AllergenSuspectedTitle)</span>
+                            </div>
+
+                            @if (!string.IsNullOrWhiteSpace(mark.Source))
+                            {
+                                <p class="evidence">
+                                    <span class="muted">@t.DetailsSource:</span>
+                                    @if (!string.IsNullOrWhiteSpace(mark.Term))
+                                    {
+                                        <b>@mark.Term</b><span class="muted"> — </span>
+                                    }
+                                    <span>@mark.Source</span>
+                                </p>
+                            }
+
+                            @if (mark.Declared)
+                            {
+                                @* No verdict buttons here on purpose: a declared
+                                   allergen is Picnic's own legally required
+                                   labelling, not a guess of ours to overrule. *@
+                                <p class="muted">@t.DetailsDeclaredFixed</p>
+                            }
+                            else
+                            {
+                                <div class="verdict">
+                                    <span class="muted">
+                                        @(verdict is null
+                                            ? t.VerdictUnreviewed
+                                            : verdict.State == VerdictState.Confirmed ? t.VerdictConfirmed : t.VerdictDenied)
+                                        @if (verdict?.By is { Length: > 0 } by)
+                                        {
+                                            <text> — @by</text>
+                                        }
+                                    </span>
+
+                                    @if (verdict is null || verdict.State != VerdictState.Confirmed)
+                                    {
+                                        <button hx-post="@($"{verdictBase}/{Uri.EscapeDataString(mark.Group)}?{listQs}&verdict=confirmed")"
+                                                hx-vals="@contextVals" hx-target="#view" hx-swap="outerHTML">@t.VerdictConfirm</button>
+                                    }
+                                    @if (verdict is null || verdict.State != VerdictState.Denied)
+                                    {
+                                        <button hx-post="@($"{verdictBase}/{Uri.EscapeDataString(mark.Group)}?{listQs}&verdict=denied")"
+                                                hx-vals="@contextVals" hx-target="#view" hx-swap="outerHTML">@t.VerdictDeny</button>
+                                    }
+                                    @if (verdict is not null)
+                                    {
+                                        <button hx-post="@($"{verdictBase}/{Uri.EscapeDataString(mark.Group)}?{listQs}&verdict=clear")"
+                                                hx-vals="@contextVals" hx-target="#view" hx-swap="outerHTML">@t.VerdictClear</button>
+                                    }
+                                </div>
+
+                                @if (verdict is not null && Model.IsStale(mark, verdict))
+                                {
+                                    <p class="stale">@t.VerdictStale</p>
+                                }
+                            }
+                        </div>
+                    }
+                }
+            </section>
+
+            @if (d.Organic || d.SaltText is not null)
+            {
+                <section>
+                    <h3>@t.DetailsFacts</h3>
+                    <ul>
+                        @if (d.Organic)
+                        {
+                            <li>@t.DetailsOrganic</li>
+                        }
+                        @if (d.SaltGramsPer100 is { } grams)
+                        {
+                            <li>@t.DetailsSalt: @string.Format(t.Numbers, "{0:0.##}", grams) g</li>
+                        }
+                    </ul>
+                </section>
+            }
+
+            @foreach (var section in sections.Where(s => s.Body.Any(b => !string.IsNullOrWhiteSpace(b))))
+            {
+                <section>
+                    <h3>@(string.IsNullOrWhiteSpace(section.Title) ? t.DetailsFacts : section.Title)</h3>
+                    @foreach (var line in section.Body.Where(b => !string.IsNullOrWhiteSpace(b)))
+                    {
+                        <p>@line</p>
+                    }
+                </section>
+            }
+
+            @if (highlights.Count > 0)
+            {
+                <section>
+                    <h3>@t.DetailsHighlights</h3>
+                    @foreach (var line in highlights)
+                    {
+                        <p>@line</p>
+                    }
+                </section>
+            }
+
+            @if (description.Count > 0)
+            {
+                <section>
+                    <h3>@t.DetailsDescription</h3>
+                    @foreach (var line in description)
+                    {
+                        <p>@line</p>
+                    }
+                </section>
+            }
+
+            @if (!anything)
+            {
+                <p class="muted">@t.DetailsUnavailable</p>
+            }
+        </div>
+    </div>
+</div>

@@ -207,6 +207,47 @@ public sealed record AppText
     public required string AllergenNoteBeforeQuestion { get; init; }
     public required string AllergenNoteAfter { get; init; }
 
+    // --------------------------------------------------- product detail (#48)
+
+    public required string DetailsOpen { get; init; }
+    public required string DetailsBack { get; init; }
+    public required string DetailsAllergens { get; init; }
+    public required string DetailsFacts { get; init; }
+    public required string DetailsOrganic { get; init; }
+    public required string DetailsSalt { get; init; }
+    public required string DetailsDescription { get; init; }
+    public required string DetailsHighlights { get; init; }
+    public required string DetailsSource { get; init; }
+    public required string DetailsUnavailable { get; init; }
+
+    /// <summary>Why a declared allergen offers no deny button. Picnic emphasising
+    /// a term in the ingredient list is EU labelling, not a guess of ours.</summary>
+    public required string DetailsDeclaredFixed { get; init; }
+
+    public required string VerdictConfirm { get; init; }
+    public required string VerdictDeny { get; init; }
+    public required string VerdictClear { get; init; }
+    public required string VerdictConfirmed { get; init; }
+    public required string VerdictDenied { get; init; }
+    public required string VerdictUnreviewed { get; init; }
+
+    /// <summary>Shown when the ingredient text has changed since the verdict was
+    /// recorded -- the verdict stands, but it was made about a different recipe.</summary>
+    public required string VerdictStale { get; init; }
+
+    /// <summary>
+    /// The label for an allergen group, looked up by the key the parser produced
+    /// rather than taken from anything on the wire -- the same rule app.js
+    /// follows for the chips. An unknown group falls back to its own key, which
+    /// is honest: it says a group was found without inventing a translation.
+    /// </summary>
+    public string AllergenLabel(string group) => group switch
+    {
+        AllergenGroups.Nuts => AllergenNuts,
+        AllergenGroups.Milk => AllergenMilk,
+        _ => group,
+    };
+
     /// <summary>
     /// The two-part "not set in configuration" notice, split around the list of
     /// missing keys that app.js builds.
@@ -392,6 +433,28 @@ public sealed record AppText
             " dat wij het woord in de ingrediënten vonden. " +
             "Geen label betekent niet dat het product vrij is van dat allergeen.",
 
+        DetailsOpen = "Productinfo",
+        DetailsBack = "Terug naar de resultaten",
+        DetailsAllergens = "Allergenen",
+        DetailsFacts = "Kenmerken",
+        DetailsOrganic = "Biologisch",
+        DetailsSalt = "Zout per 100 g",
+        DetailsDescription = "Omschrijving",
+        DetailsHighlights = "Kenmerken van Picnic",
+        DetailsSource = "Gevonden in",
+        DetailsUnavailable = "De productpagina van Picnic kon niet gelezen worden.",
+        DetailsDeclaredFixed =
+            "Picnic markeert dit allergeen zelf in de ingrediëntenlijst; dat is een wettelijke " +
+            "vermelding en kan hier niet weerlegd worden.",
+
+        VerdictConfirm = "Klopt",
+        VerdictDeny = "Klopt niet",
+        VerdictClear = "Ongedaan maken",
+        VerdictConfirmed = "Bevestigd",
+        VerdictDenied = "Weerlegd",
+        VerdictUnreviewed = "Nog niet beoordeeld",
+        VerdictStale = "De ingrediëntentekst is veranderd sinds deze beoordeling.",
+
         JsMissingConfigBefore = "Niet ingesteld in de configuratie: ",
         JsMissingConfigAfter = ". Vul aan; er wordt niets opgeslagen, alleen het token wordt bewaard.",
 
@@ -507,6 +570,28 @@ public sealed record AppText
         AllergenNoteAfter =
             " that we found the word in the ingredients. " +
             "No label does not mean the product is free of that allergen.",
+
+        DetailsOpen = "Details",
+        DetailsBack = "Back to the results",
+        DetailsAllergens = "Allergens",
+        DetailsFacts = "Facts",
+        DetailsOrganic = "Organic",
+        DetailsSalt = "Salt per 100 g",
+        DetailsDescription = "Description",
+        DetailsHighlights = "Picnic highlights",
+        DetailsSource = "Found in",
+        DetailsUnavailable = "Picnic's product page could not be read.",
+        DetailsDeclaredFixed =
+            "Picnic marks this allergen in the ingredient list itself. That is a legal " +
+            "declaration and cannot be overruled here.",
+
+        VerdictConfirm = "Correct",
+        VerdictDeny = "Not correct",
+        VerdictClear = "Undo",
+        VerdictConfirmed = "Confirmed",
+        VerdictDenied = "Refuted",
+        VerdictUnreviewed = "Not reviewed yet",
+        VerdictStale = "The ingredient text has changed since this was reviewed.",
 
         JsMissingConfigBefore = "Not set in the configuration: ",
         JsMissingConfigAfter = ". Fill these in; nothing is stored, only the token is kept.",

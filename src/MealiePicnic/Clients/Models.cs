@@ -46,7 +46,17 @@ public static class AllergenGroups
 /// matched ordinary text. The card shows the first with a tick and the second
 /// with a question mark, because they are not the same claim.
 /// </summary>
-public sealed record AllergenMark(string Group, bool Declared);
+/// <param name="Term">
+/// The word that actually matched, so the detail view can say why a chip is
+/// there (issue #48). Null on marks built before the evidence existed.
+/// </param>
+/// <param name="Source">
+/// The ingredient-list sentence the term was found in, cleaned and trimmed. This
+/// is the "source of the claim" the detail view shows, and the text a
+/// confirm/deny verdict is recorded against -- Picnic reformulates products, and
+/// a verdict made against a different ingredient list is worth spotting.
+/// </param>
+public sealed record AllergenMark(string Group, bool Declared, string? Term = null, string? Source = null);
 
 /// <summary>
 /// The facts Picnic only publishes on the product page: whether the product is
@@ -60,12 +70,33 @@ public sealed record AllergenMark(string Group, bool Declared);
 /// same as "contains none of them". None is worth showing as a negative, so the
 /// UI omits what it does not know and never renders a "free from" claim.
 /// </summary>
+/// <remarks>
+/// Everything from <see cref="Title"/> down is what the product page already
+/// gave us and this record used to discard (issue #48): the parser read the
+/// main container, the highlights, the description and every accordion section,
+/// then kept only the two derived facts. The detail view needs the text itself,
+/// and carrying it costs no extra request -- the page is fetched and cached once
+/// either way.
+/// </remarks>
 public sealed record PicnicDetails(
     string Id,
     bool Organic,
     double? SaltGramsPer100,
     string? SaltText,
-    IReadOnlyList<AllergenMark> Allergens);
+    IReadOnlyList<AllergenMark> Allergens,
+    string? Title = null,
+    IReadOnlyList<string>? Highlights = null,
+    IReadOnlyList<string>? Description = null,
+    IReadOnlyList<DetailSection>? Sections = null);
+
+/// <summary>One accordion section of a Picnic product page: ingredients,
+/// nutrition, storage advice, and whatever else the product carries.</summary>
+public sealed record DetailSection(string Title, IReadOnlyList<string> Body)
+{
+    /// <summary>Whether this is the section allergens are read from -- the detail
+    /// view marks it, since it is the one the chips can be checked against.</summary>
+    public bool Ingredients { get; init; }
+}
 
 /// <summary>How a shopping list item relates to Picnic, for the current household.</summary>
 public enum LinkState

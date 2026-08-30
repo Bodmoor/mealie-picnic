@@ -39,7 +39,12 @@ public sealed class ProductFactsStore
     /// the parse that produced it changes. Old files are then discarded rather
     /// than reinterpreted.
     /// </summary>
-    private const int Schema = 1;
+    /// Schema 2 (issue #48) added the evidence behind an allergen mark. A schema-1
+    /// file has marks with no term and no source, and serving those would make the
+    /// detail view unable to say why a chip is there and, worse, record verdicts
+    /// with no ingredient text to go stale against. Discarding them costs one
+    /// product-page fetch each.
+    private const int Schema = 2;
 
     /// <summary>
     /// Enough for a very large household's browsing history at roughly a hundred
@@ -219,17 +224,29 @@ public sealed class ProductFactsStore
             details.Organic,
             details.SaltGramsPer100,
             details.SaltText,
-            [.. details.Allergens.Select(a => new StoredAllergen(a.Group, a.Declared))]);
+            [.. details.Allergens.Select(a => new StoredAllergen(a.Group, a.Declared, a.Term, a.Source))]);
 
+        // Note what is deliberately absent: Title, Highlights, Description and
+        // Sections. That text is display-only and orders of magnitude larger than
+        // the rest of a record, so persisting it would break this store's sizing
+        // for the sake of a view that already has a memory cache. The detail view
+        // asks PicnicClient for a full record instead, which skips this store.
         public PicnicDetails ToDetails(string id) => new(
             id,
             Organic,
             SaltGramsPer100,
             SaltText,
-            [.. (Allergens ?? []).Select(a => new AllergenMark(a.Group, a.Declared))]);
+            [.. (Allergens ?? []).Select(a => new AllergenMark(a.Group, a.Declared, a.Term, a.Source))]);
     }
 
+    /// <param name="Term">The word that matched, and <paramref name="Source"/> the
+    /// ingredient sentence it was found in (issue #48). Kept here, unlike the rest
+    /// of the page text, because a verdict is recorded against the source and
+    /// compared with it afterwards -- a mark restored without it would silently
+    /// never be able to go stale.</param>
     private sealed record StoredAllergen(
         [property: JsonPropertyName("group")] string Group,
-        [property: JsonPropertyName("declared")] bool Declared);
+        [property: JsonPropertyName("declared")] bool Declared,
+        [property: JsonPropertyName("term")] string? Term = null,
+        [property: JsonPropertyName("source")] string? Source = null);
 }

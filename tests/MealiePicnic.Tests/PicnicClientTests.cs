@@ -460,6 +460,67 @@ public class PicnicClientTests
     /// and an "alternatives-container" holds a competing product that happens to be
     /// organic and salt-free. That last block is the whole point of the fixture.
     /// </summary>
+    [Fact]
+    public async Task A_full_record_carries_the_page_text()
+    {
+        // Issue #48. The detail view renders these; the card never asked for them,
+        // which is why PicnicDetails used to throw them away.
+        var handler = new StubHandler().OnJson("product-details-page-root", ProductPage);
+
+        var details = await TestFactory.Picnic(handler, tokens: Tokens("tok"))
+            .GetDetailsAsync("s1000001", default, full: true);
+
+        Assert.Equal("Volle melk", details.Title);
+        Assert.Contains("Verse volle melk, gepasteuriseerd.", details.Description ?? []);
+        Assert.Contains(details.Sections ?? [], s => s.Ingredients);
+    }
+
+    [Fact]
+    public async Task A_stored_record_cannot_answer_a_full_request()
+    {
+        // The persistent facts store keeps a compact projection sized for thousands
+        // of products, so it does not hold the page text. Serving one of its records
+        // to the detail view would render an empty frame that looks like an
+        // unreadable product page.
+        var handler = new StubHandler().OnJson("product-details-page-root", ProductPage);
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var facts = new ProductFactsStore(TestFactory.Options(dir), NullLogger<ProductFactsStore>.Instance);
+
+        // Warm the disk store the way a search grid would.
+        await TestFactory.Picnic(handler, TestFactory.Options(dir), Tokens("tok"), facts: facts)
+            .GetDetailsAsync("s1000001", default);
+
+        // A fresh client: nothing in memory, so only the disk store could answer.
+        var full = await TestFactory.Picnic(handler, TestFactory.Options(dir), Tokens("tok"), facts: facts)
+            .GetDetailsAsync("s1000001", default, full: true);
+
+        Assert.Equal("Volle melk", full.Title);
+        Assert.Equal(2, handler.Sent.Count);   // it fetched rather than serving a stripped record
+    }
+
+    [Fact]
+    public async Task Stored_allergen_marks_keep_their_evidence()
+    {
+        // Not display-only: a verdict is recorded against the source text and
+        // compared with it afterwards, so a mark restored from disk without it
+        // could never be found stale.
+        var page = ProductPage.Replace(
+            """ "body": { "markdown": "Volle melk" } """.Trim(),
+            """ "body": { "markdown": "Volle melk, hazelnoten" } """.Trim());
+        var handler = new StubHandler().OnJson("product-details-page-root", page);
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var facts = new ProductFactsStore(TestFactory.Options(dir), NullLogger<ProductFactsStore>.Instance);
+
+        await TestFactory.Picnic(handler, TestFactory.Options(dir), Tokens("tok"), facts: facts)
+            .GetDetailsAsync("s1000001", default);
+
+        var stored = facts.Get("s1000001");
+        var nuts = Assert.Single(stored!.Allergens, a => a.Group == AllergenGroups.Nuts);
+
+        Assert.Equal("hazelnoten", nuts.Term);
+        Assert.Equal("Volle melk, hazelnoten", nuts.Source);
+    }
+
     private const string ProductPage = """
         {
           "layout": { "body": { "children": [
@@ -614,9 +675,23 @@ public class PicnicClientTests
         var details = await TestFactory.Picnic(handler, tokens: Tokens("tok"))
             .GetDetailsAsync("s1000001", default);
 
-        Assert.Equal(
-            [new AllergenMark(AllergenGroups.Nuts, false), new AllergenMark(AllergenGroups.Milk, true)],
-            details.Allergens);
+        Assert.Collection(details.Allergens,
+            nuts =>
+            {
+                Assert.Equal(AllergenGroups.Nuts, nuts.Group);
+                Assert.False(nuts.Declared);
+                // Issue #48: the evidence behind the chip. The word that matched,
+                // and the ingredient text it was found in.
+                Assert.Equal("hazelnoten", nuts.Term);
+                Assert.Equal("Volle melk, hazelnoten", nuts.Source);
+            },
+            milk =>
+            {
+                Assert.Equal(AllergenGroups.Milk, milk.Group);
+                Assert.True(milk.Declared);
+                Assert.Equal("melk", milk.Term);
+                Assert.Equal("Volle melk, hazelnoten", milk.Source);
+            });
     }
 
     // A page whose ingredient list carries no allergen, but whose description --
