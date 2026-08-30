@@ -65,6 +65,49 @@ public class ListViewTests
         Assert.DoesNotContain(AppText.Current.AddAllToBasket, filter);
     }
 
+    // ------------------------------------------------------- account row (#60)
+
+    private static string AccountRow() =>
+        Regex.Match(Html.AppPage, "<div class=\"account\".*?</div>\\s*</div>", RegexOptions.Singleline).Value;
+
+    [Fact]
+    public void Both_account_actions_are_buttons_rather_than_links()
+    {
+        // They revoke the Picnic token and end the session. Neither should look
+        // like a word in a sentence, which is what an <a href="#"> and a
+        // link-styled button gave them.
+        var account = AccountRow();
+
+        Assert.NotEqual("", account);
+        Assert.DoesNotContain("<a ", account);
+        Assert.DoesNotContain("linklike", account);
+        Assert.Equal(3, Regex.Matches(account, "<button").Count);   // sign in, sign out, app sign-out
+    }
+
+    [Fact]
+    public void The_picnic_button_covers_both_states()
+    {
+        // Signed out is not a state with nothing to do in it: the same position
+        // becomes the way in, via the credentials dialog.
+        var account = AccountRow();
+
+        Assert.Contains("$store.picnic.logout()", account);
+        Assert.Contains("$store.picnic.promptLogin()", account);
+        Assert.Contains(AppText.Current.PicnicSignOutAction, account);
+        Assert.Contains(AppText.Current.PicnicSignInAction, account);
+    }
+
+    [Fact]
+    public void The_app_sign_out_is_still_a_post()
+    {
+        // A GET that signs you out can be fired by an <img> tag, and SameSite=Lax
+        // does not stop a top-level GET navigation.
+        var account = AccountRow();
+
+        Assert.Contains("<form method=\"post\" action=\"/logout\">", account);
+        Assert.Contains("type=\"submit\"", account);
+    }
+
     [Fact]
     public void The_account_line_carries_no_separator_that_can_strand()
     {

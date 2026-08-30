@@ -121,11 +121,20 @@ public static class Html
           button.primary:hover { background:#4a8fd4 }
           button.danger:hover { border-color:#c86a6a; color:#e59a9a }
           .muted { color:#9aa0a6; font-size:13px }
-          /* Each child is one complete statement, so a wrap happens between them
+          /* Status and actions, each a whole unit, so a wrap happens between them
              and never inside one (issue #56). The gap replaces the separator
              character that used to be able to strand at a line end. */
-          .account { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 16px }
-          .account form { display:contents }
+          .account { display:flex; flex-wrap:wrap; align-items:center; gap:6px 16px;
+                     margin-top:4px }
+          .account .status { white-space:nowrap }
+          .account-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap }
+          /* The form is only there to make the app sign-out a POST -- a GET that
+             signs you out can be fired by an <img> tag. It must not become a
+             layout box of its own. */
+          .account-actions form { display:contents }
+          /* Secondary next to the toolbar's controls, but still a button:
+             these are the two actions with consequences on this page. */
+          button.small { padding:5px 11px; font-size:13px }
           .linklike { border:0; background:none; padding:0; color:#7fb2e5;
                       text-decoration:underline; cursor:pointer; font-size:inherit }
           .item { display:flex; align-items:center; gap:12px; padding:10px 12px;
@@ -245,19 +254,30 @@ public static class Html
           <img src="/icons/192.png" width="34" height="34" alt="">
           <h1>Mealie &rarr; Picnic</h1>
         </a>
-        <!-- Two whole phrases, each one flex item (issue #56). The separator used
-             to be a literal &middot; between them, which on a narrow screen was
-             free to end up as the last thing on a line with nothing after it.
-             Spacing does that job now, so a wrap can only ever happen between
-             the two statements. -->
-        <div class="account muted" x-data x-cloak>
-          <span x-show="$store.picnic.authenticated">{{text.PicnicLabel}}: <b class="ok">{{text.PicnicSignedIn}}</b>
-            <a href="#" x-on:click.prevent="$store.picnic.logout()">{{text.PicnicSignOut}}</a></span>
-          <span x-show="!$store.picnic.authenticated">{{text.PicnicLabel}}: <b class="bad">{{text.PicnicSignedOut}}</b>
-            <a href="#" x-on:click.prevent="$store.picnic.promptLogin()">{{text.PicnicSignIn}}</a></span>
-          <form method="post" action="/logout">
-            <button type="submit" class="linklike">{{text.AppSignOutBefore}}<span x-show="$store.me.label"> (<span x-text="$store.me.label"></span>)</span>{{text.AppSignOutAfter}}</button>
-          </form>
+        <!-- Status, then actions (issue #60). Both actions used to be words in a
+             sentence -- an <a href="#"> and a button styled to look like one --
+             even though one revokes the Picnic token, costing a login and
+             possibly 2FA to undo, and the other ends the session. They are
+             buttons now, sized like the rest of the app's controls.
+             The two Picnic buttons occupy the same position and only one is ever
+             shown, so the row does not shift when the status changes.
+             The separator between status and actions is spacing, not a literal
+             character (issue #56): a &middot; could end up last on a wrapped line
+             with nothing after it. -->
+        <div class="account" x-data x-cloak>
+          <span class="status muted">{{text.PicnicLabel}}:
+            <b class="ok" x-show="$store.picnic.authenticated">{{text.PicnicSignedIn}}</b>
+            <b class="bad" x-show="!$store.picnic.authenticated">{{text.PicnicSignedOut}}</b>
+          </span>
+          <div class="account-actions">
+            <button class="small" x-show="$store.picnic.authenticated"
+                    x-on:click="$store.picnic.logout()">{{text.PicnicSignOutAction}}</button>
+            <button class="small" x-show="!$store.picnic.authenticated"
+                    x-on:click="$store.picnic.promptLogin()">{{text.PicnicSignInAction}}</button>
+            <form method="post" action="/logout">
+              <button type="submit" class="small" title="{{text.AppSignOutTitle}}">{{text.AppSignOutAction}}<span x-show="$store.me.label"> (<span x-text="$store.me.label"></span>)</span></button>
+            </form>
+          </div>
         </div>
 
         <div id="view" hx-get="/api/list" hx-trigger="load" hx-swap="outerHTML">
