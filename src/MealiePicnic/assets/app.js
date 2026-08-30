@@ -348,14 +348,10 @@ function factsHtml(d) {
   return out.join('');
 }
 
-// A failed htmx request for lack of Picnic auth becomes the login dialog instead
-// of a dead swap. Global, so it covers every htmx-driven action on the page, not
-// just search (which is all the old pendingRetry flow covered).
-// Issue #63: every other failure. htmx does not swap a non-2xx response, so
-// before this a Mealie outage, a 500 or a timeout was a click that did nothing at
-// all, with no message anywhere on the page. Only two messages, because only two
-// things a reader can act on: the upstream is down and it is worth trying later,
-// or something else went wrong. The status code is not information they can use.
+// Issue #63. htmx does not swap a non-2xx response, so before the status region
+// existed a Mealie outage or a 500 was a click that did nothing at all, with no
+// message anywhere on the page. Written as text, never markup: an upstream error
+// body is attacker-influenced in the general case.
 function showStatus(message) {
   const el = document.getElementById('status');
   if (!el) return;
@@ -368,6 +364,29 @@ function clearStatus() {
   if (el) { el.textContent = ''; el.hidden = true; }
 }
 
+// What to say about a failed response. Only two generic messages, because there
+// are only two things a reader can act on -- an upstream is down and it is worth
+// trying again, or something on our side went wrong and it is not. A status code
+// is not information they can use.
+//
+// The exception is the one error the server goes to trouble to explain: a 422
+// no_household names the email that is not linked to a Mealie household yet
+// (EndpointHelpers.NoHousehold). Discarding that for "something went wrong"
+// throws away the only message here that tells someone what to fix, so it is
+// read out of the body instead. JSON.parse rather than string interpolation, and
+// showStatus writes text, so nothing from the response can become markup.
+function statusMessageFor(xhr) {
+  if (xhr.status === 422) {
+    try {
+      const body = JSON.parse(xhr.responseText);
+      if (body.error === 'no_household' && body.message) return body.message;
+    } catch { /* not our JSON; fall through to the generic message */ }
+  }
+  // 502/503/504 is the reverse proxy or an upstream, which is worth retrying;
+  // anything else is ours and is not.
+  return xhr.status >= 502 && xhr.status <= 504 ? t('upstreamDown') : t('somethingWentWrong');
+}
+
 // A successful request means whatever was being reported is over.
 document.body.addEventListener('htmx:afterRequest', (evt) => {
   if (evt.detail.successful) clearStatus();
@@ -378,12 +397,14 @@ document.body.addEventListener('htmx:afterRequest', (evt) => {
 // the most total kind of failure completely silent.
 document.body.addEventListener('htmx:sendError', () => showStatus(t('upstreamDown')));
 
+// A failed htmx request for lack of Picnic auth becomes the login dialog instead
+// of a dead swap. Global, so it covers every htmx-driven action on the page, not
+// just search (which is all the old pendingRetry flow covered). Every other
+// failure goes to the status region.
 document.body.addEventListener('htmx:responseError', (evt) => {
   const xhr = evt.detail.xhr;
   if (xhr.status !== 401 || !xhr.responseText.includes('picnic_auth')) {
-    // 502/503/504 is the reverse proxy or an upstream, which is worth retrying;
-    // anything else is ours and is not.
-    showStatus(xhr.status >= 502 && xhr.status <= 504 ? t('upstreamDown') : t('somethingWentWrong'));
+    showStatus(statusMessageFor(xhr));
     return;
   }
 

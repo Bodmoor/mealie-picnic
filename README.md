@@ -221,6 +221,10 @@ sent to Mealie — which is where the sharp edges are:
   not: an expired record is dropped on load, and a file written under an older schema is
   discarded rather than reinterpreted. Also that a corrupt or unwritable file degrades to
   "no cached facts" instead of taking the app down with it.
+* `BasketHandoffTests` — the parts of a basket run that stay in the handler: only
+  linked-and-open items are sent, unlinked foods are counted so the reader knows the
+  basket is not the whole list, and the out-of-band swap that refreshes the list fails
+  loudly rather than producing a response the browser quietly half-ignores.
 * `BasketRunTests` — the run that spends money: two foods linked to one product are
   summed into a single line, a product missing from the returned cart is reported as
   refused rather than added, a failed Mealie check-off still reports a successful add

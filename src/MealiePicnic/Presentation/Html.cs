@@ -9,6 +9,31 @@ namespace MealiePicnic.Presentation;
 /// </summary>
 public static class Html
 {
+    /// <summary>
+    /// Marks a rendered ListView so htmx swaps it out of band -- the basket
+    /// response then carries the log AND the refreshed list, instead of costing a
+    /// second round trip (issue #70).
+    ///
+    /// Throws rather than returning the html untouched when the root element is
+    /// not where it expects. This was a plain string Replace inside the handler,
+    /// so an attribute reordered in ListView.cshtml would have quietly produced a
+    /// response whose second half the browser ignored: the list simply would not
+    /// refresh after a check-off, with nothing anywhere saying why.
+    /// </summary>
+    public static string AsOutOfBandSwap(string listHtml)
+    {
+        const string marker = "<div id=\"view\"";
+        var at = listHtml.IndexOf(marker, StringComparison.Ordinal);
+        if (at < 0)
+        {
+            throw new InvalidOperationException(
+                $"ListView no longer starts with {marker}, so it cannot be swapped out of band.");
+        }
+
+        var end = at + marker.Length;
+        return listHtml[..end] + " hx-swap-oob=\"true\"" + listHtml[end..];
+    }
+
     private sealed record Rendered(AppText Text, string Html);
 
     // Built once per language rather than per request: the shell carries no

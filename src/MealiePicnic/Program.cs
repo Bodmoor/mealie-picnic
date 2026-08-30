@@ -1,22 +1,14 @@
 using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
 using System.Threading.RateLimiting;
 using MealiePicnic;
 using MealiePicnic.Clients;
-using MealiePicnic.Presentation;
-using MealiePicnic.Slices;
+using MealiePicnic.Endpoints;
 using MealiePicnic.Storage;
-using RazorSlices;
-using Microsoft.AspNetCore.Authentication;          // SignInAsync / SignOutAsync
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
-using Microsoft.AspNetCore.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 

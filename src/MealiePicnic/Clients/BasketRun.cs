@@ -104,3 +104,27 @@ public sealed class BasketRun(PicnicClient picnic, MealieClient mealie, ILogger<
 
 /// <summary>What a run produced, in the shape BasketLog already renders.</summary>
 public sealed record BasketOutcome(List<CartResult> Results, bool Aborted);
+
+/// <summary>
+/// Which items a basket run acts on, and how many it had to leave behind
+/// (issue #70). Two one-line filters, extracted for the same reason the run
+/// itself was: inside the handler they were unreachable from a test, and they
+/// decide what gets ordered.
+/// </summary>
+/// <param name="Skipped">
+/// Foods with no Picnic link at all. Reported to the reader rather than silently
+/// dropped -- "23 nog niet gekoppeld" under the log is how you find out the
+/// basket is not the whole list.
+/// </param>
+public sealed record BasketSelection(List<ShoppingItem> ToAdd, int Skipped)
+{
+    public static BasketSelection From(IEnumerable<ShoppingItem> items)
+    {
+        var all = items as IReadOnlyList<ShoppingItem> ?? [.. items];
+        return new BasketSelection(
+            // Excluded foods are deliberately absent: "not at Picnic" is a
+            // decision already made, not something left to do.
+            [.. all.Where(i => i.State == LinkState.Linked && !i.Checked)],
+            all.Count(i => i.State == LinkState.New));
+    }
+}
