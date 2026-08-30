@@ -215,6 +215,12 @@ sent to Mealie — which is where the sharp edges are:
   not: an expired record is dropped on load, and a file written under an older schema is
   discarded rather than reinterpreted. Also that a corrupt or unwritable file degrades to
   "no cached facts" instead of taking the app down with it.
+* `BasketRunTests` — the run that spends money: two foods linked to one product are
+  summed into a single line, a product missing from the returned cart is reported as
+  refused rather than added, a failed Mealie check-off still reports a successful add
+  (a failed line would invite a retry and a double order), an upstream failure aborts
+  every line with the upstream message, and an auth failure or a cancellation is
+  rethrown rather than folded into per-line errors.
 * `MealieReadsTests` — one request reads a list once; a *new* request reads it again,
   because the shopping list is shared mutable data and must not be cached across
   requests; and `Invalidate()` really does force the re-read the basket run depends on

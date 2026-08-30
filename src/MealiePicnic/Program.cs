@@ -61,6 +61,9 @@ builder.Services.AddHttpClient<PicnicClient>();
 // serving a single keystroke. See MealieReads.
 builder.Services.AddScoped<MealieReads>();
 
+// Scoped so it composes with MealieReads above; the run itself holds no state.
+builder.Services.AddScoped<BasketRun>();
+
 // Single-password cookie auth in front of everything. Simple on purpose: this app
 // holds credentials for a supermarket account, so it must not be open.
 var authentication = builder.Services
@@ -951,9 +954,14 @@ api.MapPost("/include", async (HttpContext ctx, MealieReads reads, HouseholdLink
 
 // ----------------------------------------------------------------- basket
 
-api.MapPost("/basket", async (HttpContext ctx, MealieClient mealie, MealieReads reads, PicnicClient picnic,
+// The run itself lives in BasketRun (issue #62): it is the only path in this app
+// that spends money, and inside an endpoint lambda it needed a
+// WebApplicationFactory and two stubbed upstreams to reach, so none of it was
+// tested. This handler now does what a handler should -- read the form, load the
+// list, hand off, render.
+api.MapPost("/basket", async (HttpContext ctx, MealieReads reads, BasketRun run,
                               HouseholdLinkStore links, AppOptions opt,
-                              ILogger<Program> log, CancellationToken ct) =>
+                              CancellationToken ct) =>
 {
     var form = await ctx.Request.ReadFormAsync(ct);
     var listId = form["listId"].ToString();
@@ -967,75 +975,9 @@ api.MapPost("/basket", async (HttpContext ctx, MealieClient mealie, MealieReads 
     var (_, resolvedListId, items) = await LoadListAsync(householdKey, listId, reads, links, opt, ct);
     var toAdd = items.Where(i => i.State == LinkState.Linked && !i.Checked).ToList();
 
-    // One request for the whole basket (issue #27), keyed by Picnic product id:
-    // two Mealie items can link to the same product, so their amounts are summed
-    // rather than sent as separate lines.
-    var quantities = new Dictionary<string, int>();
-    foreach (var item in toAdd)
-        quantities[item.PicnicUid!] = quantities.GetValueOrDefault(item.PicnicUid!) + item.Amount;
-
-    var results = new List<CartResult>();
-    var aborted = false;
-    var abortReason = "";
-
-    if (quantities.Count > 0)
-    {
-        JsonNode? cart = null;
-        try
-        {
-            cart = await picnic.AddProductsToCartAsync(quantities, ct);
-        }
-        // These must not be swallowed: the 401 middleware turns the auth failure
-        // into the login dialog, and cancellation must stop here.
-        catch (PicnicAuthException) { throw; }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            // Full detail to the log; only a short, stable message to the client
-            // (upstream error bodies can contain internal paths and payloads).
-            log.LogWarning(ex, "Batch basket add failed for {Count} products", quantities.Count);
-            aborted = true;
-            abortReason = ex is HttpRequestException
-                ? AppText.Current.BasketUpstreamFailed
-                : AppText.Current.BasketInternalError;
-        }
-
-        foreach (var item in toAdd)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            // Verifiably in the cart, not just a cheerful status code (issue #7):
-            // still true for the batch call, which answers with the updated cart.
-            if (aborted || cart is null || !PicnicClient.CartHasProduct(cart, item.PicnicUid!))
-            {
-                results.Add(new CartResult(item.FoodName, item.PicnicUid!, item.Amount, false,
-                    aborted ? abortReason : AppText.Current.BasketPicnicRefused));
-                continue;
-            }
-
-            var checkedOff = false;
-            if (checkOff)
-            {
-                try
-                {
-                    await mealie.CheckItemAsync(item.ItemId, ct);
-                    checkedOff = true;
-                }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
-                {
-                    // The basket add DID succeed. Reporting this as a failed line
-                    // would invite a retry and a double order, so it is recorded as
-                    // a successful add that is still on the Mealie list.
-                    log.LogWarning(ex, "Checked off failed for {Food} ({ItemId})",
-                        item.FoodName, item.ItemId);
-                }
-            }
-
-            results.Add(new CartResult(
-                item.FoodName, item.PicnicUid!, item.Amount, true, null, checkedOff));
-        }
-    }
+    var outcome = await run.ExecuteAsync(toAdd, checkOff, ct);
+    var results = outcome.Results;
+    var aborted = outcome.Aborted;
 
     var skipped = items.Count(i => i.State == LinkState.New);
     var logHtml = await BasketLog.Create(new BasketLogModel(results, skipped, aborted, checkOff)).RenderAsync();
