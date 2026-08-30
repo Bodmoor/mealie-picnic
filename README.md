@@ -32,10 +32,22 @@ nutrition sections, the highlights, the description, the organic claim and the
 salt figure — laid out in one place.
 
 Its reason for existing is the allergen chips (issue #48). The detail view shows
-**why** each chip is there: the word that matched and the ingredient sentence it
-was found in. A *suspected* chip — our word list matched, but Picnic did not mark
-the term — can then be confirmed or denied, and that verdict is stored in
-`DATA_DIR/allergen-verdicts.json`.
+**why** each chip is there: the word that matched and the ingredient text around
+it. A chip carries one of three strengths, and they are three different claims:
+
+| strength | mark | what it means |
+| --- | --- | --- |
+| declared | ✓ | Picnic emphasised the term in the ingredient list — the emphasis EU labelling requires |
+| suspected | ? | our word list matched ordinary ingredient text |
+| traces | ~ | the term appeared only in a "kan sporen van … bevatten" line — a warning about the factory, not an ingredient (issue #58) |
+
+A traces line is not suppressed: for a household avoiding an allergen it is real
+information, and dropping it silently would be worse than showing it. It simply
+must not read as loudly as an ingredient, which is what it did before — a nut
+chip on a chickpea dip whose only nut was in the factory warning.
+
+Suspected and traces chips can be confirmed or denied, and that verdict is stored
+in `DATA_DIR/allergen-verdicts.json`.
 
 That store is **global**, not per household: whether a product contains nuts is a
 fact about the product, and the answer does not change because a different
@@ -174,7 +186,10 @@ sent to Mealie — which is where the sharp edges are:
   positive-only display turns into lies on the card: `kokosmelk` and `melkdistel` are not
   dairy, `nootmuskaat` is not a nut, and `amandelmelk` is nuts but not milk. Also that
   emphasis inside a compound (`karne**melk**poeder`) still declares, and that the grid
-  never words its explanation as a "free from" claim.
+  never words its explanation as a "free from" claim. Since #58 it also covers the
+  three strengths: a "kan sporen van" line reads as traces, an ingredient outranks
+  it, emphasis inside such a line does not promote it, and the quoted evidence
+  always contains the word it is evidence for.
 * `AppOptionsTests` — defaults, required keys, blank values falling through, and the
   OIDC-vs-`APP_PASSWORD` required-key interplay.
 * `TokenStoreTests` — the token survives a restart, so 2FA stays rare; also that a
@@ -185,7 +200,7 @@ sent to Mealie — which is where the sharp edges are:
   throwing.
 * `ProductDetailTests` — the card carries both actions without nesting one button
   inside another, the detail view shows the matched word and its source sentence, a
-  suspected mark can be confirmed or denied while a declared one cannot, and a
+  suspected or traces mark can be confirmed or denied while a declared one cannot, and a
   verdict made against different ingredient text is flagged as stale.
 * `UserKeyTests` — the OIDC-`sub`-to-storage-key hash is stable, collision-free
   between subjects, and falls back to a fixed constant for the panic login.

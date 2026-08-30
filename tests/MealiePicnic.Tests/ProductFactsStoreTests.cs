@@ -20,7 +20,7 @@ public class ProductFactsStoreTests : IDisposable
             NullLogger<ProductFactsStore>.Instance);
 
     private static PicnicDetails Details(string id = "s1002202", bool organic = true) =>
-        new(id, organic, 0.11, "0,11 g", [new AllergenMark(AllergenGroups.Milk, true)]);
+        new(id, organic, 0.11, "0,11 g", [new AllergenMark(AllergenGroups.Milk, AllergenEvidence.Declared)]);
 
     public void Dispose()
     {
@@ -45,6 +45,24 @@ public class ProductFactsStoreTests : IDisposable
         var allergen = Assert.Single(restarted.Allergens);
         Assert.Equal(AllergenGroups.Milk, allergen.Group);
         Assert.True(allergen.Declared);
+    }
+
+    [Fact]
+    public void The_strength_of_an_allergen_mark_survives_a_restart()
+    {
+        // Issue #58. Storing this as declared/not-declared would have restored a
+        // factory warning as an ingredient claim, which is the bug itself.
+        var first = Store();
+        first.Put(new PicnicDetails("s1002202", false, null, null,
+            [new AllergenMark(AllergenGroups.Nuts, AllergenEvidence.Traces, "NOTEN",
+                "Kan sporen van NOTEN en PINDA'S bevatten.")]));
+        first.Flush();
+
+        var mark = Assert.Single(Store().Get("s1002202")!.Allergens);
+
+        Assert.Equal(AllergenEvidence.Traces, mark.Evidence);
+        Assert.False(mark.Declared);
+        Assert.Equal("NOTEN", mark.Term);
     }
 
     [Fact]

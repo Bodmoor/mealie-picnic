@@ -210,6 +210,10 @@ public static class Html
           .verdict button { font-size:12px; padding:4px 10px }
           .stale { margin:7px 0 0; font-size:12.5px; color:#e0a2a2 }
           .allergen.declared { border-color:#7a3f3f; color:#e0a2a2 }
+          /* Quieter still than a suspected chip (issue #58): a "kan sporen van"
+             line is a warning about the factory, not a claim about what is in
+             the product, and it must not read as loudly as one. */
+          .allergen.traces { border-color:#3a3d41; color:#8e939a }
           .allergen-note { margin:14px 0 0 }
           pre { background:#111316; border:1px solid #2a2d31; border-radius:9px; padding:13px;
                 overflow:auto; max-height:440px; font-size:12px; color:#c9cdd2 }

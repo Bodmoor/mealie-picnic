@@ -194,6 +194,13 @@ public sealed record AppText
     public required string AllergenDeclaredTitle { get; init; }
     public required string AllergenSuspectedTitle { get; init; }
 
+    /// <summary>
+    /// The third strength (issue #58): the term appeared only in a "kan sporen
+    /// van ... bevatten" line, which warns about the factory rather than
+    /// describing what is in the product.
+    /// </summary>
+    public required string AllergenTracesTitle { get; init; }
+
     // --------------------------------------------------- allergen explanation
 
     /// <summary>
@@ -295,6 +302,7 @@ public sealed record AppText
         },
         allergenDeclared = AllergenDeclaredTitle,
         allergenSuspected = AllergenSuspectedTitle,
+        allergenTraces = AllergenTracesTitle,
     });
 
     /// <summary>
@@ -426,6 +434,7 @@ public sealed record AppText
         AllergenMilk = "melk",
         AllergenDeclaredTitle = "Picnic markeert dit allergeen in de ingrediëntenlijst",
         AllergenSuspectedTitle = "Gevonden in de ingrediëntentekst, maar niet door Picnic gemarkeerd",
+        AllergenTracesTitle = "Alleen genoemd als mogelijke sporen: een waarschuwing over de fabriek, geen ingrediënt",
 
         AllergenNoteBeforeTick = "Allergenen komen van de Picnic-productpagina. ",
         AllergenNoteBeforeQuestion = " betekent dat Picnic het allergeen zelf markeert, ",
@@ -564,6 +573,7 @@ public sealed record AppText
         AllergenMilk = "milk",
         AllergenDeclaredTitle = "Picnic marks this allergen in the ingredient list",
         AllergenSuspectedTitle = "Found in the ingredient text, but not marked by Picnic",
+        AllergenTracesTitle = "Only mentioned as possible traces: a warning about the factory, not an ingredient",
 
         AllergenNoteBeforeTick = "Allergens come from Picnic's product page. ",
         AllergenNoteBeforeQuestion = " means Picnic marks the allergen itself, ",

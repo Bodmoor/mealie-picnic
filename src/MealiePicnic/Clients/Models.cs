@@ -46,17 +46,60 @@ public static class AllergenGroups
 /// matched ordinary text. The card shows the first with a tick and the second
 /// with a question mark, because they are not the same claim.
 /// </summary>
+/// <summary>
+/// How strongly the ingredient text supports an allergen mark (issue #58).
+/// Three different claims, which the card and the detail view must not blur.
+/// </summary>
+/// <remarks>
+/// Written as a name, not an ordinal, in both the API response app.js reads and
+/// the on-disk facts store: a number here would silently change meaning the day
+/// a fourth strength is added in the middle.
+/// </remarks>
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
+public enum AllergenEvidence
+{
+    /// <summary>
+    /// Picnic emphasised the term in the ingredient list -- the emphasis EU
+    /// labelling requires of a real allergen. Their assertion, not ours.
+    /// </summary>
+    Declared,
+
+    /// <summary>Our word list matched ordinary ingredient text.</summary>
+    Suspected,
+
+    /// <summary>
+    /// The term matched only inside a precautionary statement -- "kan sporen van
+    /// noten bevatten". That is a cross-contamination warning about the factory,
+    /// not a statement about what is in the product, and reading it as an
+    /// ingredient is what put a nut chip on a chickpea dip.
+    /// </summary>
+    Traces,
+}
+
 /// <param name="Term">
 /// The word that actually matched, so the detail view can say why a chip is
 /// there (issue #48). Null on marks built before the evidence existed.
 /// </param>
 /// <param name="Source">
-/// The ingredient-list sentence the term was found in, cleaned and trimmed. This
-/// is the "source of the claim" the detail view shows, and the text a
-/// confirm/deny verdict is recorded against -- Picnic reformulates products, and
-/// a verdict made against a different ingredient list is worth spotting.
+/// The ingredient-list text around the term, cleaned and trimmed to a window
+/// centred on the match. This is the "source of the claim" the detail view
+/// shows, and the text a confirm/deny verdict is recorded against -- Picnic
+/// reformulates products, and a verdict made against a different ingredient list
+/// is worth spotting.
 /// </param>
-public sealed record AllergenMark(string Group, bool Declared, string? Term = null, string? Source = null);
+public sealed record AllergenMark(
+    string Group,
+    AllergenEvidence Evidence,
+    string? Term = null,
+    string? Source = null)
+{
+    /// <summary>
+    /// Picnic's own labelling, and the one strength no one here may overrule.
+    /// Kept as a property because that question is asked in several places and
+    /// `Evidence == AllergenEvidence.Declared` reads worse at every one of them.
+    /// </summary>
+    public bool Declared => Evidence == AllergenEvidence.Declared;
+}
 
 /// <summary>
 /// The facts Picnic only publishes on the product page: whether the product is

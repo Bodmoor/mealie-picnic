@@ -54,9 +54,17 @@
                         var label = t.AllergenLabel(mark.Group);
                         var verdict = Model.VerdictFor(mark.Group);
                         <div class="allergen-row">
+                            @{
+                                var (markClass, markTitle) = mark.Evidence switch
+                                {
+                                    AllergenEvidence.Declared => ("allergen declared", t.AllergenDeclaredTitle),
+                                    AllergenEvidence.Traces => ("allergen traces", t.AllergenTracesTitle),
+                                    _ => ("allergen", t.AllergenSuspectedTitle),
+                                };
+                            }
                             <div class="allergen-head">
-                                <span class="allergen @(mark.Declared ? "declared" : "")">@label</span>
-                                <span class="muted">@(mark.Declared ? t.AllergenDeclaredTitle : t.AllergenSuspectedTitle)</span>
+                                <span class="@markClass">@label</span>
+                                <span class="muted">@markTitle</span>
                             </div>
 
                             @if (!string.IsNullOrWhiteSpace(mark.Source))
