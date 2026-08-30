@@ -592,3 +592,6 @@ src/MealiePicnic/**/picnic-token
 src/MealiePicnic/**/picnic-device
 src/MealiePicnic/**/keys/
 src/MealiePicnic/**/users/
+
+# Machine-local Claude Code settings; the skills beside it are shared.
+.claude/settings.local.json
