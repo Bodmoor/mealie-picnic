@@ -245,6 +245,44 @@ if (options.TrustProxy)
     app.UseForwardedHeaders(forwarded);
 }
 
+// One deliberate line per request (issue #68), replacing the four the framework
+// emitted at Information -- which is now off, see appsettings.json.
+//
+// The path is logged WITHOUT its query string, and that is the point rather than
+// tidiness: the OIDC callback carries the authorization code and state as query
+// parameters, and the framework's own request logging wrote them to the console
+// in full. A logger that never sees a query string cannot leak one.
+//
+// Static assets and the health endpoint are skipped so polling and cached files
+// do not refill the log with lines nobody will read.
+app.Use(async (ctx, next) =>
+{
+    var path = ctx.Request.Path.Value ?? "/";
+    if (path.StartsWith("/assets/", StringComparison.Ordinal) || path == "/health")
+    {
+        await next();
+        return;
+    }
+
+    var log = ctx.RequestServices.GetRequiredService<ILogger<Program>>();
+    var started = System.Diagnostics.Stopwatch.GetTimestamp();
+
+    // Scope, so every warning raised while serving this request carries the same
+    // id and identity -- otherwise "Household lookup failed" is a line with no
+    // way back to what the person was doing.
+    using (log.BeginScope(new Dictionary<string, object>
+           {
+               ["requestId"] = ctx.TraceIdentifier,
+               ["user"] = ctx.User.Identity?.Name ?? "anonymous",
+           }))
+    {
+        await next();
+        log.LogInformation("{Method} {Path} {Status} in {Elapsed:0}ms",
+            ctx.Request.Method, path, ctx.Response.StatusCode,
+            System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+    }
+});
+
 app.UseRateLimiter();
 
 // Minimal security headers.

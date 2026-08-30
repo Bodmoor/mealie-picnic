@@ -107,7 +107,9 @@ public sealed class TokenStore
             // rather than presenting an empty bearer token to Picnic.
             entry.Token = token.Length == 0 ? null : token;
             if (entry.Token is not null)
-                _log.LogInformation("Loaded cached Picnic token from {Path}", entry.TokenPath);
+                // Debug, not Information (issue #68): a cache hit is the normal
+                // case and says nothing anyone needs on a healthy start.
+                _log.LogDebug("Loaded cached Picnic token from {Path}", entry.TokenPath);
         }
 
         _entries[key] = entry;

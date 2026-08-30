@@ -141,6 +141,29 @@ All via environment variables.
 | `COOKIE_SECURE`        | no       | `true`         | Secure flag on the session cookie (needs TLS); set `false` for plain-HTTP loopback-only local dev |
 | `TRUST_PROXY`          | no       | `true`         | honour X-Forwarded-* from a reverse proxy; set `false` only when nothing is actually in front |
 
+## Logging
+
+One line per request — method, path, status, elapsed — plus whatever the app
+itself has to say. The framework's own request logging is turned down to
+`Warning` in `appsettings.json`, which is a security setting as much as a noise
+one: it logs the full request URL at `Information`, and the OIDC callback carries
+the authorization code and state in the query string. Those were being written to
+the console in full.
+
+The replacement logs `Request.Path`, never the query string, so it cannot leak one
+by construction. A test pins that, and fails if either the middleware or the log
+level regresses.
+
+Warnings raised while serving a request carry a scope with the request id and the
+signed-in identity, so a line like `Household lookup failed` can be traced back to
+what someone was doing. `/health` and `/assets/*` are not logged.
+
+Raise a category temporarily without rebuilding by setting it in `stack.env`:
+
+```
+Logging__LogLevel__Microsoft.AspNetCore=Information
+```
+
 ## Health
 
 `GET /health` is anonymous and answers `{"status":"ok"}`, or 503 when `DATA_DIR`
