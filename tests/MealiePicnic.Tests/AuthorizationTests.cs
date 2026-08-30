@@ -119,6 +119,29 @@ public class AuthorizationTests
     }
 
     [Fact]
+    public async Task Health_answers_without_a_session()
+    {
+        // Issue #65. A monitor cannot hold a cookie, so this has to be reachable
+        // anonymously -- which is exactly why the next test matters.
+        using var factory = NewFactory();
+        var response = await NewClient(factory).GetAsync("/health");
+
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Health_reveals_nothing_but_a_status()
+    {
+        // It is the one endpoint an unauthenticated caller from the internet can
+        // reach and get a 200 from, so what it says has to stay boring: no
+        // version, no configuration, no paths.
+        using var factory = NewFactory();
+        var body = await (await NewClient(factory).GetAsync("/health")).Content.ReadAsStringAsync();
+
+        Assert.Equal("{\"status\":\"ok\"}", body);
+    }
+
+    [Fact]
     public async Task Wrong_password_sets_no_cookie_and_shows_the_error()
     {
         using var factory = NewFactory();

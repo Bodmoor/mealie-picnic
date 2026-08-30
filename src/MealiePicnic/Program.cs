@@ -331,6 +331,38 @@ app.MapGet("/icons/{name}", (string name, HttpContext ctx) =>
 app.MapGet("/manifest.webmanifest", () =>
     Results.Content(Icons.Manifest, "application/manifest+json")).AllowAnonymous();
 
+// Issue #65. Nothing outside the process could tell "the port is open" from "the
+// app works", so the reverse proxy would happily keep sending traffic to a
+// container whose data directory had gone read-only while every page still
+// rendered.
+//
+// Deliberately narrow. It does not check Picnic: a lapsed token is an ordinary
+// state the UI already handles, and reporting it as unhealthy would have a
+// restart loop fighting a login prompt. It does check that DATA_DIR is writable,
+// because that is the failure that silently breaks token and link storage while
+// the app looks fine -- the one case where "the port answers" actively misleads.
+//
+// It is reachable without authentication, so it says only whether the process is
+// serving. No versions, no configuration, no paths.
+app.MapGet("/health", (AppOptions opt, ILogger<Program> log) =>
+{
+    try
+    {
+        var probe = Path.Combine(opt.DataDir, ".health");
+        File.WriteAllText(probe, "");
+        File.Delete(probe);
+    }
+    catch (Exception ex)
+    {
+        // The reason goes to the log; the anonymous response says only that
+        // something is wrong.
+        log.LogWarning(ex, "Health check failed: {Path} is not writable", opt.DataDir);
+        return Results.Json(new { status = "unhealthy" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    return Results.Ok(new { status = "ok" });
+}).AllowAnonymous();
+
 // htmx, Alpine (CSP build) and this app's own client JS -- embedded and
 // self-served rather than CDN-loaded (see Vendor.cs). Only ever referenced from
 // the (authenticated) app shell, so no AllowAnonymous here, unlike the assets

@@ -141,6 +141,20 @@ All via environment variables.
 | `COOKIE_SECURE`        | no       | `true`         | Secure flag on the session cookie (needs TLS); set `false` for plain-HTTP loopback-only local dev |
 | `TRUST_PROXY`          | no       | `true`         | honour X-Forwarded-* from a reverse proxy; set `false` only when nothing is actually in front |
 
+## Health
+
+`GET /health` is anonymous and answers `{"status":"ok"}`, or 503 when `DATA_DIR`
+is not writable. That one check is deliberate: a read-only volume silently breaks
+token and link storage while every page still renders, which is the one case
+where "the port answers" is actively misleading.
+
+It does not check Picnic — a lapsed token is an ordinary state the UI already
+handles, and reporting it as unhealthy would have a restart loop fighting a login
+prompt. It reveals nothing else either, since anyone on the internet can reach it.
+
+The Dockerfile still has no `HEALTHCHECK`: the aspnet base image ships neither
+curl nor wget. Poll this from the reverse proxy or from monitoring instead.
+
 ## Icons
 
 The three PNGs and `eu-organic.svg` in `src/MealiePicnic/assets/` are
