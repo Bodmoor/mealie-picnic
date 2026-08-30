@@ -131,12 +131,21 @@ public static class Html
              the whole card, so the tap target is what it always was; `all:unset`
              strips the browser's button chrome that the card used to override. */
           .card .pick { all:unset; display:block; width:100%; cursor:pointer }
-          .card .info { position:absolute; top:6px; right:6px; z-index:2;
-                        width:22px; height:22px; padding:0; line-height:20px;
-                        border-radius:50%; border:1px solid #3a3d41; background:#15171a;
-                        color:#9aa0a6; font-size:12px; font-style:italic; font-weight:700;
+          /* Issue #54: four times the area it started at, and flush into the
+             corner rather than floating 6px inside it. At 22px it sat over the
+             product image and a miss ran the OTHER action -- linking the product,
+             which then has to be undone. 44px is the minimum touch target both
+             mobile platforms ask for. The radius follows the card's own 10px on
+             the outer corner, and rounds the inner one so it reads as a corner
+             tile rather than a square dropped on top. */
+          .card .info { position:absolute; top:0; right:0; z-index:2;
+                        width:44px; height:44px; padding:0; line-height:44px;
+                        border-radius:0 10px 0 10px;
+                        border:0; border-left:1px solid #2a2d31; border-bottom:1px solid #2a2d31;
+                        background:#15171a;
+                        color:#9aa0a6; font-size:17px; font-style:italic; font-weight:700;
                         text-align:center; cursor:pointer }
-          .card .info:hover { border-color:#5b9dd9; color:#e8eaed }
+          .card .info:hover { border-color:#5b9dd9; color:#e8eaed; background:#1d2126 }
           .card.linked { border-color:#4f8a5c; background:#1a2420 }
           .card.linked:hover { border-color:#7fc08a }
           .badge { display:inline-block; font-size:11px; color:#7fc08a;
