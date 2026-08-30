@@ -154,11 +154,17 @@ The replacement logs `Request.Path`, never the query string, so it cannot leak o
 by construction. A test pins that, and fails if either the middleware or the log
 level regresses.
 
-Warnings raised while serving a request carry a scope with the request id and the
-signed-in identity, so a line like `Household lookup failed` can be traced back to
-what someone was doing. `/health` and `/assets/*` are not logged.
+Warnings raised while serving a request carry a scope naming the signed-in
+identity, so a line like `Household lookup failed` can be traced back to whose
+request it was. The identity is resolved when the line is written, not when the
+scope opens: the middleware runs before authentication — deliberately, so a
+request the rate limiter rejects still gets a line — and there is no identity yet
+at that point. The request id comes from the framework's own scope, so this one
+does not repeat it. `/health` and `/assets/*` are not logged.
 
-Raise a category temporarily without rebuilding by setting it in `stack.env`:
+Raise a category temporarily without rebuilding by setting it in `stack.env` —
+noting that this particular one **re-opens the OIDC leak above** for as long as it
+is set, since it turns the framework's full-URL logging back on:
 
 ```
 Logging__LogLevel__Microsoft.AspNetCore=Information

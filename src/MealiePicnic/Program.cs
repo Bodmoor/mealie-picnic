@@ -221,6 +221,21 @@ builder.Services.AddRateLimiter(limiter =>
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
             }));
+
+    // /health is anonymous and does a write-and-delete on DATA_DIR, so an
+    // unlimited one is free disk I/O on the volume holding the tokens and links.
+    // Generous rather than strict: it exists to stop hammering, not to interfere
+    // with polling, and a proxy checking every few seconds must never be the
+    // thing that trips it.
+    limiter.AddPolicy("health", ctx =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 60,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            }));
 });
 
 var app = builder.Build();
@@ -270,21 +285,33 @@ app.Use(async (ctx, next) =>
     var log = ctx.RequestServices.GetRequiredService<ILogger<Program>>();
     var started = System.Diagnostics.Stopwatch.GetTimestamp();
 
-    // Scope, so every warning raised while serving this request carries the same
-    // id and identity -- otherwise "Household lookup failed" is a line with no
-    // way back to what the person was doing.
-    using (log.BeginScope(new Dictionary<string, object>
-           {
-               ["requestId"] = ctx.TraceIdentifier,
-               ["user"] = ctx.User.Identity?.Name ?? "anonymous",
-           }))
+    // Scope, so every warning raised while serving this request says who it was
+    // about -- otherwise "Household lookup failed" is a line with no way back to
+    // the person who hit it.
+    //
+    // Resolved when a line is written, not here. This middleware runs before
+    // UseAuthentication (deliberately: a request rejected by the rate limiter
+    // still deserves a log line), so ctx.User is not populated yet and reading it
+    // now recorded every request as anonymous, signed in or not. No request id
+    // either: the framework's own scope already carries RequestId and RequestPath.
+    using (log.BeginScope(new SignedInScope(ctx)))
     {
         await next();
         log.LogInformation("{Method} {Path} {Status} in {Elapsed:0}ms",
-            ctx.Request.Method, path, ctx.Response.StatusCode,
+            ctx.Request.Method, LogSafe(path), ctx.Response.StatusCode,
             System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
     }
 });
+
+// Route values arrive percent-DECODED, so a request for "/login%0aFORGED" would
+// otherwise write a second, invented line into the log -- and a forged line is
+// exactly what misleads whoever is reading `docker logs` while debugging. Also
+// capped: a path is caller-chosen and has no length limit worth trusting.
+static string LogSafe(string path)
+{
+    var clean = new string([.. path.Where(c => !char.IsControl(c)).Take(200)]);
+    return clean.Length < path.Length ? clean + "…" : clean;
+}
 
 app.UseRateLimiter();
 
@@ -368,6 +395,38 @@ app.Run();
 internal record TwoFactorChannel(string? Channel);
 internal record Otp(string? Code);
 internal record LoginRequest(string? User, string? Password);
+
+/// <summary>
+/// The signed-in identity, read when a log line is written rather than when the
+/// scope opens.
+///
+/// The request-logging middleware runs before UseAuthentication, so a dictionary
+/// built at scope-open time captured the unauthenticated principal and recorded
+/// every request as "anonymous" -- including requests from a signed-in session.
+/// A scope state that is enumerated by the console formatter at write time sees
+/// the principal the pipeline has since established.
+/// </summary>
+internal sealed class SignedInScope(HttpContext ctx) : IReadOnlyList<KeyValuePair<string, object>>
+{
+    private KeyValuePair<string, object> User =>
+        new("user", ctx.User.Identity?.Name ?? "anonymous");
+
+    public int Count => 1;
+
+    public KeyValuePair<string, object> this[int index] =>
+        index == 0 ? User : throw new ArgumentOutOfRangeException(nameof(index));
+
+    public IEnumerator<KeyValuePair<string, object>> GetEnumerator()
+    {
+        yield return User;
+    }
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+
+    // What the console formatter prints for the scope when it is not enumerating
+    // the pairs itself.
+    public override string ToString() => $"user:{User.Value}";
+}
 
 /// <summary>Marker so WebApplicationFactory-based integration tests can host the app.</summary>
 public partial class Program;

@@ -71,11 +71,15 @@ internal static class PwaEndpoints
     // serving. No versions, no configuration, no paths.
     app.MapGet("/health", (AppOptions opt, ILogger<Program> log) =>
     {
+        // Unique per probe. A fixed filename races when two things poll at once --
+        // a proxy check and an orchestrator check, say -- one deleting the file
+        // while the other is still writing it, and the loser answers 503. A false
+        // unhealthy driving a restart loop is precisely what this endpoint exists
+        // to avoid, so it must not be able to cause one itself.
+        var probe = Path.Combine(opt.DataDir, $".health-{Guid.NewGuid():N}");
         try
         {
-            var probe = Path.Combine(opt.DataDir, ".health");
             File.WriteAllText(probe, "");
-            File.Delete(probe);
         }
         catch (Exception ex)
         {
@@ -84,9 +88,15 @@ internal static class PwaEndpoints
             log.LogWarning(ex, "Health check failed: {Path} is not writable", opt.DataDir);
             return Results.Json(new { status = "unhealthy" }, statusCode: StatusCodes.Status503ServiceUnavailable);
         }
+        finally
+        {
+            // Best effort: a probe left behind is litter, not a failure, and must
+            // never turn a healthy instance unhealthy.
+            try { File.Delete(probe); } catch { /* ignored */ }
+        }
 
         return Results.Ok(new { status = "ok" });
-    }).AllowAnonymous();
+    }).AllowAnonymous().RequireRateLimiting("health");
 
     // htmx, Alpine (CSP build) and this app's own client JS -- embedded and
     // self-served rather than CDN-loaded (see Vendor.cs). Only ever referenced from
