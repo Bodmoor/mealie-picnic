@@ -23,6 +23,31 @@ OIDC email claim looked up against Mealie's admin API; see `MEALIE_TOKEN` below.
 Foods with no link at all for the current household are shown first as **nieuw**.
 Excluded foods are hidden behind a toggle, where the setting can be reverted.
 
+## Product detail
+
+Each search result card carries a small **i** button in its corner. Clicking the
+card still links the product, as it always did; the corner button opens a detail
+view instead, with everything Picnic's product page gives us — the ingredient and
+nutrition sections, the highlights, the description, the organic claim and the
+salt figure — laid out in one place.
+
+Its reason for existing is the allergen chips (issue #48). The detail view shows
+**why** each chip is there: the word that matched and the ingredient sentence it
+was found in. A *suspected* chip — our word list matched, but Picnic did not mark
+the term — can then be confirmed or denied, and that verdict is stored in
+`DATA_DIR/allergen-verdicts.json`.
+
+That store is **global**, not per household: whether a product contains nuts is a
+fact about the product, and the answer does not change because a different
+household is asking. Verdicts record who made them and against which ingredient
+text, so a verdict made before a reformulation is flagged as stale rather than
+quietly trusted.
+
+A **declared** allergen — one Picnic emphasises in the ingredient list, as EU
+labelling requires — offers no deny button, and the endpoint rejects the attempt.
+Overruling a legal allergen declaration by clicking would turn a safety label into
+a preference; a declared mark that looks wrong is a parser bug, not a verdict.
+
 ## Run
 
 ### From the published image (GHCR)
@@ -146,6 +171,13 @@ sent to Mealie — which is where the sharp edges are:
 * `TokenStoreTests` — the token survives a restart, so 2FA stays rare; also that a
   `null` key keeps writing the original flat layout, and different keys get isolated
   `DATA_DIR/users/{key}/` slots.
+* `AllergenVerdictStoreTests` — verdicts round-trip, survive a restart, are kept per
+  product and per group, and a truncated file reads as "not reviewed" rather than
+  throwing.
+* `ProductDetailTests` — the card carries both actions without nesting one button
+  inside another, the detail view shows the matched word and its source sentence, a
+  suspected mark can be confirmed or denied while a declared one cannot, and a
+  verdict made against different ingredient text is flagged as stale.
 * `UserKeyTests` — the OIDC-`sub`-to-storage-key hash is stable, collision-free
   between subjects, and falls back to a fixed constant for the panic login.
 * `OidcAuthorizationTests` — `/login` challenges Authentik instead of rendering the

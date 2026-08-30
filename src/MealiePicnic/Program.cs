@@ -30,6 +30,7 @@ AppText.Current = AppText.For(options.Language);
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<TokenStore>();
 builder.Services.AddSingleton<HouseholdLinkStore>();
+builder.Services.AddSingleton<AllergenVerdictStore>();
 builder.Services.AddHttpContextAccessor();
 
 // Keep the key ring on the mounted volume. The default location is inside the
@@ -607,6 +608,98 @@ api.MapGet("/details/{productId}", async (string productId, PicnicClient picnic,
 
     return Results.Ok(await picnic.GetDetailsAsync(productId, ct));
 });
+
+// ------------------------------------------------------------ product detail
+// Issue #48. The card's small corner button opens this; the rest of the card
+// still links the product. Name, pack and image id ride along from the card
+// (hx-vals) rather than being looked up again -- the card already has them, and
+// the product page fetch below is the only upstream call this view makes.
+
+api.MapGet("/products/{productId}", async (
+    string productId, string? listId, string? foodId, string? name, string? pack, string? imageId,
+    PicnicClient picnic, MealieClient mealie, HouseholdLinkStore links,
+    AllergenVerdictStore verdicts, AppOptions opt, HttpContext ctx, CancellationToken ct) =>
+{
+    if (!Regex.IsMatch(productId, "^[A-Za-z0-9_-]{1,32}$"))
+        return Results.BadRequest(new { error = "invalid_product_id" });
+
+    return await RenderProductAsync(productId, listId, foodId, name, pack, imageId,
+        picnic, mealie, links, verdicts, opt, ctx, ct);
+});
+
+// Confirm or deny a suspected allergen, globally (issue #48). Re-renders the same
+// panel rather than returning a fragment, so the verdict and the buttons around it
+// update together and the view cannot drift out of step with the store.
+api.MapPost("/products/{productId}/allergens/{group}", async (
+    string productId, string group, string? verdict, string? listId,
+    PicnicClient picnic, MealieClient mealie, HouseholdLinkStore links,
+    AllergenVerdictStore verdicts, AppOptions opt, HttpContext ctx, CancellationToken ct) =>
+{
+    if (!Regex.IsMatch(productId, "^[A-Za-z0-9_-]{1,32}$"))
+        return Results.BadRequest(new { error = "invalid_product_id" });
+
+    var form = await ctx.Request.ReadFormAsync(ct);
+    var details = await picnic.GetDetailsAsync(productId, ct);
+    var mark = details.Allergens.FirstOrDefault(a => a.Group == group);
+
+    // Only groups this product actually carries, and only suspected ones. A
+    // declared allergen is Picnic's own emphasis in the ingredient list, which EU
+    // labelling requires of a real one -- letting a click switch that off would
+    // turn a safety label into a preference. The UI does not offer it; this is
+    // what stops a hand-made request doing it anyway.
+    if (mark is null) return Results.NotFound();
+    if (mark.Declared) return Results.BadRequest(new { error = "declared_allergen" });
+
+    var by = ctx.User.FindFirstValue(ClaimTypes.Email) ?? ctx.User.FindFirstValue("email");
+    switch (verdict)
+    {
+        case "confirmed": verdicts.Set(productId, group, VerdictState.Confirmed, by, mark.Source); break;
+        case "denied": verdicts.Set(productId, group, VerdictState.Denied, by, mark.Source); break;
+        case "clear": verdicts.Clear(productId, group); break;
+        default: return Results.BadRequest(new { error = "invalid_verdict" });
+    }
+
+    return await RenderProductAsync(productId, listId,
+        form["foodId"].ToString(), form["name"].ToString(), form["pack"].ToString(), form["imageId"].ToString(),
+        picnic, mealie, links, verdicts, opt, ctx, ct);
+});
+
+async Task<IResult> RenderProductAsync(
+    string productId, string? listId, string? foodId, string? name, string? pack, string? imageId,
+    PicnicClient picnic, MealieClient mealie, HouseholdLinkStore links,
+    AllergenVerdictStore verdicts, AppOptions opt, HttpContext ctx, CancellationToken ct)
+{
+    if (string.IsNullOrEmpty(foodId) || !Guid.TryParse(foodId, out _) ||
+        (!string.IsNullOrEmpty(listId) && !Guid.TryParse(listId, out _)))
+        return Results.BadRequest(new { error = "invalid_request" });
+
+    var householdKey = HouseholdContext.KeyOf(ctx.User);
+    if (householdKey is null) return NoHousehold(ctx.User);
+
+    // The item is what the back button and the heading need; the detail view is
+    // still reached from one food's search results, not from nowhere.
+    var (_, resolvedListId, items) = await LoadListAsync(householdKey, listId, mealie, links, opt, ct);
+    var item = items.FirstOrDefault(i => i.FoodId == foodId);
+    if (item is null) return Results.NotFound();
+
+    // Same rule as every other id that reaches a URL: never pass through an
+    // unvalidated one. A bad image id simply drops the picture rather than
+    // failing the whole view.
+    var safeImage = !string.IsNullOrEmpty(imageId) && Regex.IsMatch(imageId, "^[A-Za-z0-9_-]{1,128}$")
+        ? imageId
+        : null;
+
+    var details = await picnic.GetDetailsAsync(productId, ct);
+    var model = new ProductDetailModel(
+        item, resolvedListId, productId,
+        string.IsNullOrWhiteSpace(name) ? null : name,
+        string.IsNullOrWhiteSpace(pack) ? null : pack,
+        safeImage,
+        details,
+        verdicts.ForProduct(productId));
+
+    return Results.Content(await ProductDetail.Create(model).RenderAsync(), "text/html");
+}
 
 api.MapGet("/image/{imageId}", async (string imageId, PicnicClient picnic, CancellationToken ct) =>
 {

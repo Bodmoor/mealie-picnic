@@ -555,9 +555,23 @@ public class PicnicClientTests
         var details = await TestFactory.Picnic(handler, tokens: Tokens("tok"))
             .GetDetailsAsync("s1000001", default);
 
-        Assert.Equal(
-            [new AllergenMark(AllergenGroups.Nuts, false), new AllergenMark(AllergenGroups.Milk, true)],
-            details.Allergens);
+        Assert.Collection(details.Allergens,
+            nuts =>
+            {
+                Assert.Equal(AllergenGroups.Nuts, nuts.Group);
+                Assert.False(nuts.Declared);
+                // Issue #48: the evidence behind the chip. The word that matched,
+                // and the ingredient text it was found in.
+                Assert.Equal("hazelnoten", nuts.Term);
+                Assert.Equal("Volle melk, hazelnoten", nuts.Source);
+            },
+            milk =>
+            {
+                Assert.Equal(AllergenGroups.Milk, milk.Group);
+                Assert.True(milk.Declared);
+                Assert.Equal("melk", milk.Term);
+                Assert.Equal("Volle melk, hazelnoten", milk.Source);
+            });
     }
 
     // A page whose ingredient list carries no allergen, but whose description --

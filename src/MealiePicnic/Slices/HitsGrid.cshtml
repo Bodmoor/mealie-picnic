@@ -31,29 +31,51 @@ else
                 label = p.Name,
                 pack = p.UnitQuantity,
             });
-            <button class="card @(isLinked ? "linked" : "")"
-                    hx-post="@($"/api/link?listId={Uri.EscapeDataString(Model.ListId)}")"
-                    hx-vals="@linkVals"
-                    hx-target="#view" hx-swap="outerHTML">
-                @if (!string.IsNullOrEmpty(p.ImageId))
-                {
-                    <img src="@($"/api/image/{Uri.EscapeDataString(p.ImageId)}")" loading="lazy" alt="">
-                }
-                else
-                {
-                    <div style="height:104px"></div>
-                }
-                @if (isLinked)
-                {
-                    <div class="badge">&check; @t.TagLinked</div>
-                }
-                <div class="n">@p.Name</div>
-                <div class="p"><b>@p.PriceText</b> @p.UnitQuantity</div>
-                @* No x-html here: the @@alpinejs/csp build refuses that directive outright
-                   ("Using the x-html directive is prohibited in the CSP build"), so the
-                   component writes the markup from app.js instead (issue #33). *@
-                <div class="f" x-data="factsLoader" data-product-id="@p.Id"></div>
-            </button>
+            // Issue #48: the details corner button. Its own hx-vals rather than
+            // reusing linkVals -- it carries the image id too, so the detail view
+            // can show the picture without a second search, and it must not carry
+            // anything the link endpoint would act on.
+            var detailVals = JsonSerializer.Serialize(new
+            {
+                foodId = it.FoodId,
+                name = p.Name,
+                pack = p.UnitQuantity,
+                imageId = p.ImageId,
+            });
+            @* The card was a single <button> until issue #48 needed a second
+               action on it. A button cannot legally contain another button, so
+               the card is now a plain element holding two: the large one that
+               links (unchanged behaviour, still the whole card as a tap target)
+               and a small corner one that opens the details. *@
+            <div class="card @(isLinked ? "linked" : "")">
+                <button class="pick"
+                        hx-post="@($"/api/link?listId={Uri.EscapeDataString(Model.ListId)}")"
+                        hx-vals="@linkVals"
+                        hx-target="#view" hx-swap="outerHTML">
+                    @if (!string.IsNullOrEmpty(p.ImageId))
+                    {
+                        <img src="@($"/api/image/{Uri.EscapeDataString(p.ImageId)}")" loading="lazy" alt="">
+                    }
+                    else
+                    {
+                        <div style="height:104px"></div>
+                    }
+                    @if (isLinked)
+                    {
+                        <div class="badge">&check; @t.TagLinked</div>
+                    }
+                    <div class="n">@p.Name</div>
+                    <div class="p"><b>@p.PriceText</b> @p.UnitQuantity</div>
+                    @* No x-html here: the @@alpinejs/csp build refuses that directive outright
+                       ("Using the x-html directive is prohibited in the CSP build"), so the
+                       component writes the markup from app.js instead (issue #33). *@
+                    <div class="f" x-data="factsLoader" data-product-id="@p.Id"></div>
+                </button>
+                <button class="info" title="@t.DetailsOpen" aria-label="@t.DetailsOpen"
+                        hx-get="@($"/api/products/{Uri.EscapeDataString(p.Id)}?listId={Uri.EscapeDataString(Model.ListId)}")"
+                        hx-vals="@detailVals"
+                        hx-target="#view" hx-swap="outerHTML">i</button>
+            </div>
         }
     </div>
     @* Issue #14. Said once under the grid rather than on every card, and said at

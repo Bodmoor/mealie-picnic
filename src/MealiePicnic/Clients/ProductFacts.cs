@@ -218,6 +218,12 @@ public static class ProductFacts
         {
             var declared = false;
             var suspected = false;
+            // The evidence behind the mark (issue #48). Kept from the first match
+            // only: the detail view wants to show why a chip is there, not every
+            // place the word occurs, and a declared match always replaces a
+            // suspected one because it is the stronger claim.
+            string? term = null;
+            string? source = null;
 
             foreach (var raw in fragments)
             {
@@ -230,20 +236,47 @@ public static class ProductFacts
 
                 foreach (Match emphasis in Emphasised.Matches(text))
                 {
-                    if (!Anywhere[rule.Group].IsMatch(emphasis.Groups["inner"].Value)) continue;
+                    var inner = emphasis.Groups["inner"].Value;
+                    var hit = Anywhere[rule.Group].Match(inner);
+                    if (!hit.Success) continue;
                     declared = true;
+                    term = Clean(hit.Value);
+                    source = Snippet(Clean(text));
                     break;
                 }
 
                 if (declared) break;
-                if (rule.Terms.IsMatch(Clean(text))) suspected = true;
+                if (suspected) continue;
+
+                var cleaned = Clean(text);
+                var loose = rule.Terms.Match(cleaned);
+                if (!loose.Success) continue;
+                suspected = true;
+                term = loose.Value;
+                source = Snippet(cleaned);
             }
 
             if (declared || suspected)
-                found.Add(new AllergenMark(rule.Group, declared));
+                found.Add(new AllergenMark(rule.Group, declared, term, source));
         }
 
         return found;
+    }
+
+    /// <summary>
+    /// An ingredient list can run to several hundred characters, and the detail
+    /// view is quoting it as evidence rather than reproducing the label. Cut it
+    /// at a sentence-ish boundary so what is shown stays readable, and mark the
+    /// cut so nobody reads a truncated list as a complete one.
+    /// </summary>
+    private static string Snippet(string text)
+    {
+        const int limit = 240;
+        text = text.Trim();
+        if (text.Length <= limit) return text;
+
+        var cut = text.LastIndexOfAny(['.', ';', ','], limit);
+        return (cut > limit / 2 ? text[..cut] : text[..limit]).TrimEnd() + "…";
     }
 
     private static Salt? Read(string text)

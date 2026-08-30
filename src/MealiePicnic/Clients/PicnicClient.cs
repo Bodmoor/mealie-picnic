@@ -279,11 +279,18 @@ public sealed class PicnicClient(
 
         var claims = new List<string>();
         var found = false;
+        // Kept apart as well as together (issue #48): the organic claim wants
+        // every fragment in one list, while the detail view wants to show the
+        // highlights and the description as the distinct blocks they are.
+        var blocks = new Dictionary<string, List<string>>();
         foreach (var id in own)
         {
             if (FindById(page, id) is not { } node) continue;
             found = true;
-            Markdowns(node, claims);
+            var block = new List<string>();
+            Markdowns(node, block);
+            blocks[id] = block;
+            claims.AddRange(block);
         }
 
         // The accordion holds ingredients, nutrition and extra information. Its
@@ -292,6 +299,7 @@ public sealed class PicnicClient(
         var nutrition = new List<string>();
         var accordionAll = new List<string>();
         var ingredients = new List<string>();
+        var sections = new List<DetailSection>();
         var accordionSections = 0;
         if (FindById(page, "accordion-list") is { } accordion)
         {
@@ -300,6 +308,7 @@ public sealed class PicnicClient(
             {
                 accordionSections++;
                 accordionAll.AddRange(body);
+                sections.Add(new DetailSection(title, body) { Ingredients = IsIngredientSection(title) });
                 if (title.Contains("voedingswaarde", StringComparison.OrdinalIgnoreCase) ||
                     title.Contains("nutrition", StringComparison.OrdinalIgnoreCase))
                     nutrition.AddRange(body);
@@ -354,12 +363,20 @@ public sealed class PicnicClient(
             log.LogDebug("Product page for {Id} had an accordion but no ingredient section", productId);
         }
 
+        var main = blocks.GetValueOrDefault("product-details-page-root-main-container", []);
+
         return new PicnicDetails(
             Id: productId,
             Organic: ProductFacts.IsOrganic(claims),
             SaltGramsPer100: salt?.Grams,
             SaltText: salt?.Text,
-            Allergens: ProductFacts.ReadAllergens(ingredients));
+            Allergens: ProductFacts.ReadAllergens(ingredients),
+            // The first markdown of the main container is the product name; the
+            // rest of that block is brand and unit, which the highlights repeat.
+            Title: ProductFacts.Clean(main.FirstOrDefault()) is { Length: > 0 } name ? name : null,
+            Highlights: blocks.GetValueOrDefault("product-page-highlights", []),
+            Description: blocks.GetValueOrDefault("description", []),
+            Sections: sections);
     }
 
     /// <summary>Depth-first search for the node carrying a given "id".</summary>

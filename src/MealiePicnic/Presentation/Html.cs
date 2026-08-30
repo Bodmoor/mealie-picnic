@@ -125,8 +125,18 @@ public static class Html
           details.done-block .item:hover { border-color:#2a2d31 }
           .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:11px }
           .card { border:1px solid #2a2d31; border-radius:10px; padding:10px; background:#1a1d21;
-                  cursor:pointer; text-align:left }
+                  cursor:pointer; text-align:left; position:relative }
           .card:hover { border-color:#5b9dd9 }
+          /* Issue #48 split the card into two buttons. The linking one still fills
+             the whole card, so the tap target is what it always was; `all:unset`
+             strips the browser's button chrome that the card used to override. */
+          .card .pick { all:unset; display:block; width:100%; cursor:pointer }
+          .card .info { position:absolute; top:6px; right:6px; z-index:2;
+                        width:22px; height:22px; padding:0; line-height:20px;
+                        border-radius:50%; border:1px solid #3a3d41; background:#15171a;
+                        color:#9aa0a6; font-size:12px; font-style:italic; font-weight:700;
+                        text-align:center; cursor:pointer }
+          .card .info:hover { border-color:#5b9dd9; color:#e8eaed }
           .card.linked { border-color:#4f8a5c; background:#1a2420 }
           .card.linked:hover { border-color:#7fc08a }
           .badge { display:inline-block; font-size:11px; color:#7fc08a;
@@ -152,6 +162,23 @@ public static class Html
              Picnic's own declaration. */
           .allergen { font-size:11.5px; padding:0 6px; border-radius:20px;
                       border:1px solid #5a4d20; color:#c9a227; white-space:nowrap }
+          /* Product detail (issue #48) */
+          .detail { display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap }
+          .detail-image { width:180px; height:180px; object-fit:contain;
+                          background:#fff; border-radius:9px; flex:none }
+          .detail-body { flex:1 1 320px; min-width:0 }
+          .detail-body section { margin-bottom:18px }
+          .detail-body h3 { font-size:13px; text-transform:uppercase; letter-spacing:.04em;
+                            color:#9aa0a6; margin:0 0 7px }
+          .detail-body p { margin:0 0 7px; font-size:13.5px; line-height:1.45 }
+          .detail-body ul { margin:0; padding-left:18px; font-size:13.5px; line-height:1.5 }
+          .allergen-row { border:1px solid #2a2d31; border-radius:9px;
+                          padding:10px 12px; margin-bottom:10px }
+          .allergen-head { display:flex; align-items:center; gap:9px; flex-wrap:wrap }
+          .evidence { margin:8px 0 0; font-size:13px; line-height:1.45 }
+          .verdict { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:9px }
+          .verdict button { font-size:12px; padding:4px 10px }
+          .stale { margin:7px 0 0; font-size:12.5px; color:#e0a2a2 }
           .allergen.declared { border-color:#7a3f3f; color:#e0a2a2 }
           .allergen-note { margin:14px 0 0 }
           pre { background:#111316; border:1px solid #2a2d31; border-radius:9px; padding:13px;
