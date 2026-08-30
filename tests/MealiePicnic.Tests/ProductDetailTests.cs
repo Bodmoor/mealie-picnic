@@ -4,6 +4,7 @@ using MealiePicnic.Slices;
 using MealiePicnic.Storage;
 using RazorSlices;
 using System.Text.Encodings.Web;
+using System.Text.RegularExpressions;
 
 namespace MealiePicnic.Tests;
 
@@ -55,6 +56,18 @@ public class ProductDetailTests
         Assert.Contains("hx-get=\"/api/products/s1002202", html);
         // Nested buttons would be invalid HTML and behave differently per browser.
         Assert.DoesNotContain("<button class=\"card", html);
+    }
+
+    [Fact]
+    public void The_details_button_meets_the_minimum_touch_target()
+    {
+        // Issue #54. It started at 22px, over the product image, where a miss ran
+        // the other action and linked the product. 44px is what both mobile
+        // platforms ask for, and it is the number this rule exists to hold.
+        var rule = Regex.Match(Html.AppPage, @"\.card \.info \{[^}]*\}").Value;
+
+        Assert.Contains("width:44px", rule);
+        Assert.Contains("height:44px", rule);
     }
 
     // ------------------------------------------------------------- the evidence

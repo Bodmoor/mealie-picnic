@@ -25,8 +25,8 @@ Excluded foods are hidden behind a toggle, where the setting can be reverted.
 
 ## Product detail
 
-Each search result card carries a small **i** button in its corner. Clicking the
-card still links the product, as it always did; the corner button opens a detail
+Each search result card carries an **i** button filling its top-right corner.
+Clicking the card still links the product, as it always did; that button opens a detail
 view instead, with everything Picnic's product page gives us — the ingredient and
 nutrition sections, the highlights, the description, the organic claim and the
 salt figure — laid out in one place.
