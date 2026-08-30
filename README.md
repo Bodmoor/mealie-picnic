@@ -148,8 +148,9 @@ sent to Mealie — which is where the sharp edges are:
   `DATA_DIR/users/{key}/` slots.
 * `UserKeyTests` — the OIDC-`sub`-to-storage-key hash is stable, collision-free
   between subjects, and falls back to a fixed constant for the panic login.
-* `OidcAuthorizationTests` — `/login` challenges Authentik instead of rendering the
-  password form once OIDC is configured, and `/login/admin` (the break-glass route)
+* `OidcAuthorizationTests` — `/login` challenges Authentik silently, falls back to the
+  button when that cannot succeed, stays on the button after a sign-out, and never
+  renders the password form once OIDC is configured; `/login/admin` (the break-glass route)
   exists only alongside `APP_PASSWORD`.
 
 ## How it works
@@ -221,7 +222,14 @@ POST /cart/add_product    {product_id, count}
   becomes an optional break-glass fallback at `/login/admin` (deliberately not linked
   from anywhere in the UI). Who may sign in via OIDC is controlled entirely by the
   application/provider's own group policy bindings in Authentik — this app performs
-  no additional group/claim check of its own, and does not manage accounts. Every
+  no additional group/claim check of its own, and does not manage accounts. An OIDC
+  sign-in is **persistent** (a 30-day sliding cookie the browser keeps across
+  restarts); the `/login/admin` fallback deliberately stays session-scoped, so a
+  shared operator password leaves nothing behind. `/login` also attempts a
+  **silent** sign-in first (`prompt=none`), so an existing Authentik session opens
+  the app with no click at all; the button appears only when that finds no session,
+  for half an hour after an explicit sign-out, and for a minute after any attempt so
+  a cookie that fails to stick cannot become a redirect loop. Every
   signed-in identity gets its own cached Picnic token under `DATA_DIR/users/{key}/`
   once OIDC is enabled; without OIDC the token stays in the original single, shared
   location. Either way, the compose file publishes on loopback only; `COOKIE_SECURE`

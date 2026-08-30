@@ -111,6 +111,35 @@ if (options.OidcEnabled)
 
         oidc.Events = new OpenIdConnectEvents
         {
+            // Silent authentication: GET /login attempts the handshake with
+            // prompt=none first, so an existing Authentik session signs the user
+            // straight in and no button is shown at all. Authentik must not
+            // render any UI during that attempt -- prompt=none is what makes it
+            // answer immediately with either a code or an error.
+            OnRedirectToIdentityProvider = ctx =>
+            {
+                if (ctx.Properties.Items.ContainsKey(SsoFlow.SilentItem))
+                    ctx.ProtocolMessage.Prompt = "none";
+                return Task.CompletedTask;
+            },
+
+            // A silent attempt that finds no usable session comes back as
+            // `login_required` (or `interaction_required`), which the handler
+            // surfaces as a remote failure. That is an expected outcome, not an
+            // error: swallow it and fall back to the page with the button, which
+            // is exactly the behaviour this app had before silent auth existed.
+            // Non-silent failures are left alone so real problems still surface.
+            OnRemoteFailure = ctx =>
+            {
+                if (ctx.Properties?.Items.ContainsKey(SsoFlow.SilentItem) != true)
+                    return Task.CompletedTask;
+
+                var target = ctx.Properties.RedirectUri is { Length: > 0 } uri ? uri : "/";
+                ctx.HandleResponse();
+                ctx.Response.Redirect($"/login?sso=manual&ReturnUrl={Uri.EscapeDataString(target)}");
+                return Task.CompletedTask;
+            },
+
             // Resolve the caller's Mealie household once, here at sign-in, and
             // stash it on the cookie -- not on every request, which would mean
             // an admin-API round trip on every shopping-list load (issue #17).
@@ -120,6 +149,12 @@ if (options.OidcEnabled)
             // explicitly (see HouseholdContext) instead of guessing a household.
             OnTicketReceived = async ctx =>
             {
+                // Sign-in succeeded, so neither guard rail is needed any more:
+                // the "just signed out" suppression has served its purpose, and
+                // the one-attempt marker must go or the next visit after this
+                // cookie expires would skip the silent attempt for no reason.
+                SsoFlow.ClearMarkers(ctx.HttpContext);
+
                 var email = ctx.Principal?.FindFirstValue("email")
                     ?? ctx.Principal?.FindFirstValue(ClaimTypes.Email);
                 if (string.IsNullOrWhiteSpace(email))
@@ -336,29 +371,60 @@ async Task<IResult> HandlePasswordLoginAsync(HttpContext ctx, AppOptions opt, IL
 }
 
 // Static files (the SPA) are behind auth too, hence no UseStaticFiles() before this.
-// With OIDC configured this shows a "sign in" button rather than auto-challenging.
-// Authentik typically has its own active SSO session and re-authenticates
-// silently once challenged, so an immediate auto-challenge would make signing
-// out of the app instantly bounce back in with no visible transition -- this
-// page is the deliberate click that stands between the two. The cookie
-// handler's own redirect-to-/login (with ?ReturnUrl=...) is what lands here for
-// any unauthenticated request, so the original destination is preserved through
-// the round trip to Authentik and back.
+//
+// With OIDC configured, this first tries to sign the caller in *silently*
+// (prompt=none): Authentik usually has its own live session, and making someone
+// click a button to consummate a session they already hold is friction with no
+// decision in it (issue #49). Three things stop that becoming a nuisance:
+//
+//   * an explicit sign-out sets a short-lived marker, so signing out of the app
+//     does not immediately bounce back in through Authentik's still-live session
+//     with no visible transition -- the reason this page existed in the first place
+//   * every attempt sets a one-minute marker, so a silent success whose cookie
+//     fails to stick (misconfigured TLS, say) cannot turn into a redirect loop
+//   * ?sso=manual, which the silent attempt's own failure path redirects to,
+//     always renders the button
+//
+// In all three cases the page below appears, exactly as it did before. The cookie
+// handler's own redirect-to-/login (with ?ReturnUrl=...) is what lands here for any
+// unauthenticated request, so the original destination survives the round trip
+// through Authentik either way.
 app.MapGet("/login", async (HttpContext ctx, AppOptions opt) =>
 {
     if (!opt.OidcEnabled)
         return Results.Content(await LoginPage.Create(false).RenderAsync(), "text/html");
 
     var returnUrl = ctx.Request.Query["ReturnUrl"].ToString();
-    var page = await OidcLoginPage.Create(string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl).RenderAsync();
+    var target = string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl;
+
+    if (SsoFlow.ShouldTrySilently(ctx))
+    {
+        SsoFlow.MarkAttempted(ctx, opt);
+        var silent = new AuthenticationProperties { RedirectUri = target, IsPersistent = true };
+        silent.Items[SsoFlow.SilentItem] = "1";
+        return Results.Challenge(silent, [OpenIdConnectDefaults.AuthenticationScheme]);
+    }
+
+    var page = await OidcLoginPage.Create(target).RenderAsync();
     return Results.Content(page, "text/html");
 }).AllowAnonymous();
 
+// IsPersistent is what actually gives the browser a cookie that outlives the
+// browser session. Without it the cookie handler writes no Expires at all, and
+// the 30-day ExpireTimeSpan configured above governs only the ticket inside the
+// cookie -- so closing the browser, or a phone evicting the tab, meant signing in
+// again from scratch (issue #49). Deliberately not applied to the /login/admin
+// break-glass path: a shared operator password should not leave a month-long
+// cookie behind on whatever machine used it.
 app.MapGet("/login/oidc", (HttpContext ctx) =>
 {
     var returnUrl = ctx.Request.Query["ReturnUrl"].ToString();
     return Results.Challenge(
-        new AuthenticationProperties { RedirectUri = string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl },
+        new AuthenticationProperties
+        {
+            RedirectUri = string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl,
+            IsPersistent = true,
+        },
         [OpenIdConnectDefaults.AuthenticationScheme]);
 }).AllowAnonymous();
 
@@ -384,9 +450,13 @@ if (options.OidcEnabled && options.AppPassword.Length > 0)
 
 // POST, not GET: a state-changing GET can be triggered cross-site by an <img> tag,
 // and SameSite=Lax/Strict does not stop top-level GET navigations.
-app.MapPost("/logout", async (HttpContext ctx) =>
+app.MapPost("/logout", async (HttpContext ctx, AppOptions opt) =>
 {
     await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    // Authentik's own session outlives this one, so without a marker the silent
+    // attempt on the very next /login would sign the user straight back in and
+    // the sign-out would look like it did nothing.
+    SsoFlow.MarkSignedOut(ctx, opt);
     return Results.Redirect("/login");
 });
 
@@ -790,6 +860,64 @@ app.Run();
 internal record TwoFactorChannel(string? Channel);
 internal record Otp(string? Code);
 internal record LoginRequest(string? User, string? Password);
+
+/// <summary>
+/// Cookie bookkeeping for the silent-SSO attempt on GET /login (issue #49).
+///
+/// Both markers are deliberately cookies rather than session state: they must be
+/// readable on a request that has no session yet, which is the entire situation
+/// being handled. Neither carries anything sensitive -- their presence alone is
+/// the signal -- but they are HttpOnly and SameSite=Lax like the auth cookie, so
+/// nothing script-side can clear them to force a silent attempt.
+/// </summary>
+internal static class SsoFlow
+{
+    /// <summary>Key on AuthenticationProperties.Items marking an attempt as silent.</summary>
+    public const string SilentItem = "mp:silent";
+
+    private const string AttemptedCookie = "mp_sso_tried";
+    private const string SignedOutCookie = "mp_signed_out";
+
+    // Long enough to break a redirect loop, short enough that a genuine second
+    // visit a few minutes later still gets the silent path.
+    private static readonly TimeSpan AttemptWindow = TimeSpan.FromMinutes(1);
+
+    // Long enough to see the login page and walk away; after this, returning to
+    // the app signs back in silently again, which is the desired default.
+    private static readonly TimeSpan SignedOutWindow = TimeSpan.FromMinutes(30);
+
+    public static bool ShouldTrySilently(HttpContext ctx) =>
+        !ctx.Request.Query.ContainsKey("sso")
+        && !ctx.Request.Cookies.ContainsKey(AttemptedCookie)
+        && !ctx.Request.Cookies.ContainsKey(SignedOutCookie);
+
+    public static void MarkAttempted(HttpContext ctx, AppOptions opt) =>
+        ctx.Response.Cookies.Append(AttemptedCookie, "1", Options(ctx, opt, AttemptWindow));
+
+    public static void MarkSignedOut(HttpContext ctx, AppOptions opt)
+    {
+        ctx.Response.Cookies.Delete(AttemptedCookie);
+        ctx.Response.Cookies.Append(SignedOutCookie, "1", Options(ctx, opt, SignedOutWindow));
+    }
+
+    public static void ClearMarkers(HttpContext ctx)
+    {
+        ctx.Response.Cookies.Delete(AttemptedCookie);
+        ctx.Response.Cookies.Delete(SignedOutCookie);
+    }
+
+    private static CookieOptions Options(HttpContext ctx, AppOptions opt, TimeSpan lifetime) => new()
+    {
+        HttpOnly = true,
+        SameSite = SameSiteMode.Lax,
+        // Mirrors the auth cookie's CookieSecurePolicy: Always when COOKIE_SECURE
+        // is on, otherwise whatever the current request is, so plain-HTTP local
+        // development still receives the cookie.
+        Secure = opt.CookieSecure || ctx.Request.IsHttps,
+        Path = "/",
+        MaxAge = lifetime,
+    };
+}
 
 /// <summary>Marker so WebApplicationFactory-based integration tests can host the app.</summary>
 public partial class Program;

@@ -46,19 +46,84 @@ public class OidcAuthorizationTests
         factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
     [Fact]
-    public async Task Login_shows_a_sign_in_button_instead_of_the_password_form()
+    public async Task Login_tries_a_silent_sign_in_before_showing_anything()
     {
-        // Not an auto-challenge: Authentik's own SSO session usually
-        // re-authenticates silently, so signing out of the app must not bounce
-        // straight back in with no visible transition -- there has to be a
-        // deliberate click first.
+        // Issue #49: Authentik usually holds a live session already, so the first
+        // visit attempts the handshake with prompt=none rather than asking for a
+        // click that carries no decision. prompt=none is the part that guarantees
+        // Authentik answers immediately instead of rendering its own login UI.
         using var factory = NewFactory();
         var response = await NewClient(factory).GetAsync("/login");
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        var location = response.Headers.Location!.ToString();
+        Assert.StartsWith("https://authentik.test/application/o/authorize/", location);
+        Assert.Contains("prompt=none", location);
+        Assert.Contains(response.Headers.GetValues("Set-Cookie"), c => c.StartsWith("mp_sso_tried="));
+    }
+
+    [Fact]
+    public async Task Login_shows_a_sign_in_button_instead_of_the_password_form()
+    {
+        // ?sso=manual is where the silent attempt's own failure path lands, and
+        // it must produce exactly the page this app showed before silent auth
+        // existed: a button, never the password form.
+        using var factory = NewFactory();
+        var response = await NewClient(factory).GetAsync("/login?sso=manual");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
         Assert.DoesNotContain("Wachtwoord", body);
         Assert.Contains("/login/oidc", body);
+    }
+
+    [Fact]
+    public async Task A_second_visit_shows_the_button_rather_than_looping()
+    {
+        // The one-attempt marker is what stops a silent success whose cookie
+        // fails to stick from becoming an endless redirect between here and
+        // Authentik.
+        using var factory = NewFactory();
+        var request = new HttpRequestMessage(HttpMethod.Get, "/login");
+        request.Headers.Add("Cookie", "mp_sso_tried=1");
+        var response = await NewClient(factory).SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("/login/oidc", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Signing_out_stays_signed_out()
+    {
+        // Without this, the silent attempt on the redirect that follows /logout
+        // would walk straight back through Authentik's still-live session and the
+        // sign-out would appear to do nothing at all.
+        using var factory = NewFactory();
+        var request = new HttpRequestMessage(HttpMethod.Get, "/login");
+        request.Headers.Add("Cookie", "mp_signed_out=1");
+        var response = await NewClient(factory).SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("/login/oidc", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Logout_sets_the_signed_out_marker()
+    {
+        using var factory = NewFactory();
+        var client = NewClient(factory);
+
+        var login = await client.PostAsync("/login/admin",
+            new FormUrlEncodedContent([new("password", Password)]));
+        var session = Assert.Single(login.Headers.GetValues("Set-Cookie"),
+            c => c.StartsWith("mealiepicnic=")).Split(';')[0];
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/logout");
+        request.Headers.Add("Cookie", session);
+        var response = await client.SendAsync(request);
+
+        Assert.Contains(response.Headers.GetValues("Set-Cookie"),
+            c => c.StartsWith("mp_signed_out="));
     }
 
     [Fact]
@@ -71,7 +136,7 @@ public class OidcAuthorizationTests
         // cross-origin authorize page. form-action does not govern ordinary
         // link navigation, so the button must stay a plain <a href>.
         using var factory = NewFactory();
-        var body = await (await NewClient(factory).GetAsync("/login")).Content.ReadAsStringAsync();
+        var body = await (await NewClient(factory).GetAsync("/login?sso=manual")).Content.ReadAsStringAsync();
 
         Assert.DoesNotContain("<form", body, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("href=\"/login/oidc?ReturnUrl=", body);
@@ -84,9 +149,11 @@ public class OidcAuthorizationTests
         var response = await NewClient(factory).GetAsync("/login/oidc");
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        Assert.StartsWith(
-            "https://authentik.test/application/o/authorize/",
-            response.Headers.Location!.ToString());
+        var location = response.Headers.Location!.ToString();
+        Assert.StartsWith("https://authentik.test/application/o/authorize/", location);
+        // The explicit button is the interactive path: Authentik must be allowed
+        // to prompt here, which is exactly what the silent attempt forbids.
+        Assert.DoesNotContain("prompt=none", location);
     }
 
     [Fact]
@@ -134,6 +201,10 @@ public class OidcAuthorizationTests
         var cookie = Assert.Single(response.Headers.GetValues("Set-Cookie"),
             c => c.StartsWith("mealiepicnic="));
         Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
+        // Issue #49 gave the OIDC path a persistent cookie; the break-glass
+        // password path deliberately keeps a session-scoped one, so a shared
+        // operator password leaves nothing behind on the machine that used it.
+        Assert.DoesNotContain("expires", cookie, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
