@@ -70,6 +70,46 @@ public class ProductDetailTests
         Assert.Contains("height:44px", rule);
     }
 
+    // ------------------------------------------------------------ linking (#76)
+
+    [Fact]
+    public async Task The_detail_view_can_link_the_product_it_is_describing()
+    {
+        // Without this the view is a dead end: read the ingredients, then go back
+        // and find the same card in the grid to act on what you read.
+        var html = await Detail(Details());
+
+        Assert.Contains("hx-post=\"/api/link", html);
+        Assert.Contains("s1002202", html);
+        Assert.Contains(AppText.Current.DetailsLink, html);
+    }
+
+    [Fact]
+    public async Task Linking_does_not_push_a_history_entry()
+    {
+        // Linking is an action, not a place. A history entry for it would send
+        // Back to a URL that no longer describes what is on screen (issue #74).
+        var html = await Detail(Details());
+        var button = Regex.Match(html, @"<button class=""primary link-here""[\s\S]*?</button>").Value;
+
+        Assert.NotEqual("", button);
+        Assert.DoesNotContain("hx-push-url", button);
+    }
+
+    [Fact]
+    public async Task A_product_already_linked_shows_that_instead_of_a_button()
+    {
+        // The round trip would change nothing, and "am I already using this one?"
+        // is a question the reader would otherwise go back to the grid to answer.
+        var linked = Item() with { State = LinkState.Linked, PicnicUid = "s1002202" };
+        var html = await ProductDetail.Create(new ProductDetailModel(
+            linked, ListId, "s1002202", "Volle melk", "1 liter", "img1",
+            Details(), new Dictionary<string, AllergenVerdict>())).RenderAsync();
+
+        Assert.DoesNotContain("hx-post=\"/api/link", html);
+        Assert.Contains(AppText.Current.TagLinked, html);
+    }
+
     // ------------------------------------------------------------- the evidence
 
     [Fact]
