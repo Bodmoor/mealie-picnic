@@ -345,7 +345,11 @@ POST /cart/add_product    {product_id, count}
   behind TLS and builds absolute URLs (e.g. the OIDC `redirect_uri`) as `http://`,
   which most identity providers then reject as a mismatch. Set both to `false`
   explicitly only when there truly is no proxy at all (e.g. plain-HTTP loopback-only
-  local dev, which `docker-compose.yml` already does).
+  local dev, which `docker-compose.yml` already does). The app sets **no HSTS
+  header**, deliberately: TLS terminates at that proxy and the app cannot know
+  whether the connection outside it was secure. Enabling HSTS is the proxy's job,
+  on the host that serves this, and worth checking — it is off by default in
+  nginx-proxy-manager.
 * Household resolution (issue #17) happens once, at sign-in, and is cached as a claim
   on the session cookie — not looked up again until the next login. If the signed-in
   email is not linked to any Mealie household, sign-in still succeeds, but every

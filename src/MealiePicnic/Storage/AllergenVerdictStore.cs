@@ -19,6 +19,12 @@ namespace MealiePicnic.Storage;
 /// One file, read once and held in memory: there are at most a few hundred
 /// verdicts, and every write is atomic (temp file + rename), the same discipline
 /// <see cref="TokenStore"/> and <see cref="HouseholdLinkStore"/> use.
+///
+/// Deliberately no entry cap, unlike <see cref="ProductFactsStore"/> next door,
+/// which trims itself at 5000. That store fills on its own as a side effect of
+/// browsing; every row here is a person deciding something and pressing a button,
+/// so it grows at human speed and cannot run away. The asymmetry is the point,
+/// not an oversight.
 /// </summary>
 public sealed class AllergenVerdictStore
 {
