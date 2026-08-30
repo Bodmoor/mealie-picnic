@@ -157,6 +157,20 @@ public class OidcAuthorizationTests
     }
 
     [Fact]
+    public async Task A_callback_without_state_redirects_instead_of_throwing()
+    {
+        // Issue #72. The callback is anonymous and internet-facing, so it gets
+        // reached without valid state routinely — a scanner, a stale URL from
+        // history, a correlation cookie that expired mid-login. Every one of those
+        // used to be an unhandled exception and a 500 with a stack trace in the log.
+        using var factory = NewFactory();
+        var response = await NewClient(factory).GetAsync("/signin-oidc?code=whatever");
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.StartsWith("/login", response.Headers.Location!.ToString());
+    }
+
+    [Fact]
     public async Task Legacy_login_post_is_gone_once_oidc_is_enabled()
     {
         using var factory = NewFactory();

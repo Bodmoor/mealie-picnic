@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using MealiePicnic.Presentation;
+using MealiePicnic.Storage;
 
 namespace MealiePicnic.Endpoints;
 
@@ -19,10 +20,11 @@ internal static class ShellEndpoints
         {
             // Only an OIDC identity has an email claim at all -- the local/password
             // fallback identity (see HandlePasswordLoginAsync) is a single shared
-            // "owner" account, not a personal one, so there is nothing worth labelling.
-            var email = user.FindFirstValue("email") ?? user.FindFirstValue(ClaimTypes.Email);
-            var label = email is null ? null : (user.FindFirstValue("name") ?? user.FindFirstValue(ClaimTypes.Name) ?? email);
-            return Results.Ok(new { label });
+            // "owner" account, not a personal one, so there is nothing worth
+            // labelling. Shared with the request log now (issue #72), which was
+            // resolving the name its own, wrong way and calling every OIDC caller
+            // anonymous.
+            return Results.Ok(new { label = Identity.LabelOf(user) });
         });
     }
 }
