@@ -34,7 +34,7 @@
 }
 <div id="view">
     <div class="bar">
-        <button hx-get="@backQs" hx-target="#view" hx-swap="outerHTML">&larr; @t.DetailsBack</button>
+        <button hx-get="@backQs" hx-target="#view" hx-swap="outerHTML" hx-push-url="true">&larr; @t.DetailsBack</button>
         <b>@(string.IsNullOrWhiteSpace(Model.Name) ? d.Title : Model.Name)</b>
         @if (!string.IsNullOrWhiteSpace(Model.Pack))
         {

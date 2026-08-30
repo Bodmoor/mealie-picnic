@@ -6,7 +6,7 @@
 }
 <div id="view">
     <div class="bar">
-        <button hx-get="@($"/api/list?{listQs}")" hx-target="#view" hx-swap="outerHTML">&larr; @t.Back</button>
+        <button hx-get="@($"/api/list?{listQs}")" hx-target="#view" hx-swap="outerHTML" hx-push-url="true">&larr; @t.Back</button>
         <b>@it.FoodName</b>
         @if (!string.IsNullOrEmpty(it.PicnicUid))
         {

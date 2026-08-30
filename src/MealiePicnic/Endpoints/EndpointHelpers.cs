@@ -35,6 +35,23 @@ internal static class EndpointHelpers
     }
 
     /// <summary>
+    /// A view reached by navigating rather than by htmx swapping it in needs the
+    /// whole page, not the fragment (issue #74): a reload, a shared link, or a
+    /// history restore that missed htmx's cache would otherwise render an
+    /// unstyled fragment with no shell around it.
+    ///
+    /// htmx sets HX-Request on everything it sends, including its history-restore
+    /// requests, so the header's presence is exactly the question being asked.
+    /// Returns null when the caller is htmx and the fragment is what it wants.
+    /// </summary>
+    internal static IResult? ShellFor(HttpContext ctx)
+    {
+        if (ctx.Request.Headers.ContainsKey("HX-Request")) return null;
+
+        return Results.Content(Html.BootingInto(ctx.Request.Path + ctx.Request.QueryString), "text/html");
+    }
+
+    /// <summary>
     /// Which Mealie list to show when the caller did not name one: the household's
     /// remembered choice if it still exists, else the configured default by name,
     /// else whichever list is first. The old client-side loadLists() did this from
